@@ -1,0 +1,2 @@
+# Build output (scripts/build-release.js) — reproducible from source, never committed.
+dist/

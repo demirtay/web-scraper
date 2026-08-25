@@ -1,0 +1,187 @@
+ok  : TEST 1: the Başlık column's picked example appears in the setup preview, got: BaşlıkLinkFiyatFloral Shower Curtainhttps://etsy.com/listing/123$29.99
+ok  : TEST 1: the Link column's picked example appears in the setup preview
+ok  : TEST 1: the Fiyat column's picked example appears in the setup preview
+ok  : TEST 1: the setup preview table is visible once columns exist
+ok  : TEST 2: rendering the setup preview never re-scans the page — zero RUN_EXTRACTION/PREVIEW_STRUCTURE messages sent, got sent types: 
+ok  : TEST 4: BAŞLA automatically switches to the Sonuçlar tab
+ok  : TEST 4: the Veri Çek tab is no longer active after BAŞLA
+ok  : TEST 5: 60 extracted rows display as 60 rows, got: (60 rows)
+ok  : TEST 3/5: the live session status line reports 60 processed, got: 60 rows processed
+ok  : TEST 3: BİTİR is visible while the session is active
+ok  : TEST 13: export options are NOT shown before BİTİR
+ok  : REGRESSION (root cause #4): chrome.scripting.registerContentScripts (the REAL, plural API) is actually called exactly once when the permission is granted, got 1
+ok  : REGRESSION (root cause #4): crossNavRegistered is recorded TRUE on the session after a successful registration — was always false before this fix regardless of permission grant, got true
+ok  : REGRESSION: START_LIVE_WATCH is sent even when the cross-navigation permission is declined, got sent types: __PERMISSIONS_REQUEST__,RUN_EXTRACTION,CLASSIFY_AUTO_ROWS,START_LIVE_WATCH
+ok  : REGRESSION: START_LIVE_WATCH was actually sent, not skipped
+ok  : REGRESSION: the session is still active (same-page watching keeps working) even though the cross-navigation permission was declined
+ok  : REGRESSION: BAŞLA still lands on Sonuçlar when the permission is declined
+ok  : TEST 6: reopening the popup mid-session lands directly on Sonuçlar
+ok  : TEST 6: the restored session shows the existing 60 collected rows, got: (60 rows)
+ok  : TEST 6: BİTİR is still available for the restored active session
+ok  : TEST 12: BİTİR hides itself once the session is finished
+ok  : TEST 13: export options appear once BİTİR is pressed
+ok  : TEST 12: BİTİR sends STOP_LIVE_WATCH to stop the passive watcher
+ok  : TEST 12: the persisted session is marked finished, got status=finished
+ok  : TEST 12: the frozen dataset still has exactly the 60 accepted rows, got 60
+ok  : TEST 16: BAŞLA charges exactly 1 credit, got 1
+ok  : TEST 16: the popup reflects the grown 90-row dataset live via storage.onChanged, got: (90 rows)
+ok  : TEST 16: continuing the same session (more rows appended) never consumes a second credit, got 1
+ok  : TEST 16: exactly one charged run id exists for this whole session, got 1
+ok  : TEST 17a: first session charges 1 credit, got 1
+ok  : TEST 17b: a genuinely new scrape on a different site charges a second, separate credit, got 2
+Not implemented: navigation to another Document
+ok  : TEST 14: CSV export after BİTİR reports exactly the 60 accepted rows, got: 60 rows exported as CSV.
+ok  : REGRESSION: the cross-navigation permission is requested at all, got sent types: __PERMISSIONS_REQUEST__,RUN_EXTRACTION,CLASSIFY_AUTO_ROWS,START_LIVE_WATCH
+ok  : REGRESSION (root cause fix): the permission request happens BEFORE RUN_EXTRACTION — as close to the click's user-activation as possible — permission at index 0, extraction at index 1
+ok  : DEV DIAGNOSTIC: stays hidden on a normal (non-development) install
+[WebScraper][LiveSession] BAŞLA write diagnostic: {
+  normalizedDomain: 'shop.example.com',
+  storageKey: 'ws_live_session::shop.example.com',
+  storageArea: 'chrome.storage.local',
+  writeSuccess: true,
+  sessionAfterWrite: {
+    sessionId: 'livesess_1787590047675_zmc6z7',
+    hostname: 'shop.example.com',
+    tabId: 1,
+    status: 'active',
+    startedAt: 1787590047675,
+    updatedAt: 1787590047675,
+    scraperConfig: { containerSelector: '.card', columns: [Array] },
+    dedupeKey: 'c_link',
+    rows: [
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object],
+      [Object], [Object], [Object], [Object], [Object]
+    ],
+    seenKeys: {
+      '/itm/1001': true,
+      '/itm/1002': true,
+      '/itm/1003': true,
+      '/itm/1004': true,
+      '/itm/1005': true,
+      '/itm/1006': true,
+      '/itm/1007': true,
+      '/itm/1008': true,
+      '/itm/1009': true,
+      '/itm/1010': true,
+      '/itm/1011': true,
+      '/itm/1012': true,
+      '/itm/1013': true,
+      '/itm/1014': true,
+      '/itm/1015': true,
+      '/itm/1016': true,
+      '/itm/1017': true,
+      '/itm/1018': true,
+      '/itm/1019': true,
+      '/itm/1020': true,
+      '/itm/1021': true,
+      '/itm/1022': true,
+      '/itm/1023': true,
+      '/itm/1024': true,
+      '/itm/1025': true,
+      '/itm/1026': true,
+      '/itm/1027': true,
+      '/itm/1028': true,
+      '/itm/1029': true,
+      '/itm/1030': true,
+      '/itm/1031': true,
+      '/itm/1032': true,
+      '/itm/1033': true,
+      '/itm/1034': true,
+      '/itm/1035': true,
+      '/itm/1036': true,
+      '/itm/1037': true,
+      '/itm/1038': true,
+      '/itm/1039': true,
+      '/itm/1040': true,
+      '/itm/1041': true,
+      '/itm/1042': true,
+      '/itm/1043': true,
+      '/itm/1044': true,
+      '/itm/1045': true,
+      '/itm/1046': true,
+      '/itm/1047': true,
+      '/itm/1048': true,
+      '/itm/1049': true,
+      '/itm/1050': true,
+      '/itm/1051': true,
+      '/itm/1052': true,
+      '/itm/1053': true,
+      '/itm/1054': true,
+      '/itm/1055': true,
+      '/itm/1056': true,
+      '/itm/1057': true,
+      '/itm/1058': true,
+      '/itm/1059': true,
+      '/itm/1060': true
+    },
+    lastPassNewRows: 0,
+    lastCheckAt: null,
+    crossNavRegistered: true,
+    progress: { rowsCollected: 60 },
+    diagnostics: [ [Object] ]
+  },
+  sessionId: 'livesess_1787590047675_zmc6z7',
+  rowCountAfterInitialExtraction: 60,
+  readBackFound: true,
+  readBackRowCount: 60
+}
+ok  : DEV DIAGNOSTIC: reveals itself on a real development install
+ok  : DEV DIAGNOSTIC: Copy Session Diagnostic completes (clipboard or textarea fallback), got: Copied to clipboard (8989 characters). Paste it back.
+ok  : WWW-MISMATCH: BAŞLA on "www.etsy.com" stores the session under the NORMALIZED "ws_live_session::etsy.com" key, got: ws_live_session::etsy.com
+ok  : WWW-MISMATCH: reopening on the BARE domain variant still finds and restores the session — lands on Sonuçlar
+ok  : WWW-MISMATCH: the restored session shows the correct 60 rows regardless of the hostname variant, got: (60 rows)
+ok  : WWW-MISMATCH: still exactly one session key after reopening under the other variant — no duplicate session was created, got: ws_live_session::etsy.com
+ok  : DESTROY/RECREATE: BAŞLA writes 64 rows to chrome.storage.local, got 64
+ok  : DESTROY/RECREATE: the session is active immediately after BAŞLA
+ok  : DESTROY/RECREATE: a completely fresh storage read from the brand-new content-script instance finds the SAME active session (not "no active or finished session")
+ok  : DESTROY/RECREATE: all 64 originally-collected rows are available before page-2 extraction, got 64
+[Web Scraper:livewatch] pass {
+  at: 1787590050085,
+  pageUrl: 'https://shop.example.com/list?page=2',
+  changeReason: 'resume-on-load',
+  pageChangeDetected: true,
+  rescanTriggered: true,
+  raw: 64,
+  accepted: 64,
+  excluded: 0,
+  duplicates: 0,
+  newRows: 64,
+  datasetBefore: 64,
+  datasetAfter: 128,
+  operation: 'APPEND',
+  sessionStillActive: true
+}
+ok  : DESTROY/RECREATE: page 2's content is appended onto the surviving session — 64 -> 128, got 128
+ok  : DESTROY/RECREATE: all 64 of page 1's original rows are still present after page 2's pass — proves APPEND, not REPLACE
+[Web Scraper:livewatch] pass {
+  at: 1787590050423,
+  pageUrl: 'https://shop.example.com/list?page=3',
+  changeReason: 'resume-on-load',
+  pageChangeDetected: true,
+  rescanTriggered: true,
+  raw: 64,
+  accepted: 64,
+  excluded: 0,
+  duplicates: 0,
+  newRows: 64,
+  datasetBefore: 128,
+  datasetAfter: 192,
+  operation: 'APPEND',
+  sessionStillActive: true
+}
+ok  : DESTROY/RECREATE (page 3): page 3's content is appended onto the surviving session — 128 -> 192, got 192
+ok  : DESTROY/RECREATE: exactly 2 resume-on-load rescans are recorded in pass history (page 2 and page 3), got 2
+ok  : DESTROY/RECREATE: pass history includes a rescan of the page=2 URL, got: https://shop.example.com/list?page=2,https://shop.example.com/list?page=3
+ok  : DESTROY/RECREATE: pass history includes a rescan of the page=3 URL, got: https://shop.example.com/list?page=2,https://shop.example.com/list?page=3
+
+51 assertions, 0 failures

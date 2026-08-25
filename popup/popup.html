@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Web Scraper</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="ws-header">
+    <span class="ws-logo">🕸️</span>
+    <h1 data-i18n="app.title">Web Scraper</h1>
+    <span id="header-trial-badge" class="ws-trial-badge" data-i18n="header.trial.runsLeft_other" data-i18n-params='{"count":10}'>10 runs left</span>
+    <button type="button" id="settings-open-btn" class="ws-icon-btn" data-i18n-title="header.settings" data-i18n-aria-label="header.settings" title="Settings" aria-label="Settings">⚙</button>
+  </header>
+
+  <nav id="tab-nav" class="ws-tab-nav" role="tablist" aria-label="Web Scraper sections">
+    <button type="button" class="ws-tab-btn" data-tab="scrape" role="tab" aria-selected="true" data-i18n="tabs.scrape">Scrape</button>
+    <button type="button" class="ws-tab-btn" data-tab="results" role="tab" aria-selected="false" data-i18n="tabs.results">Results</button>
+    <!-- V1 UX WORKFLOW SIMPLIFICATION: Monitoring/Research are post-result
+         actions, not equal-weight top-level steps — demoted out of the
+         primary nav bar (ws-tab-btn-secondary => display:none in
+         popup.css) rather than removed, so the existing route/switchTab()/
+         panel/"← Back to Results" plumbing and every test that exercises
+         these tabs directly keeps working unchanged. Real entry points are
+         Results' own "Monitor Changes"/"Create Research Package" actions. -->
+    <button type="button" class="ws-tab-btn ws-tab-btn-secondary" data-tab="monitor" role="tab" aria-selected="false" data-i18n="tabs.monitor">Monitor</button>
+    <button type="button" class="ws-tab-btn ws-tab-btn-secondary" data-tab="research" role="tab" aria-selected="false" data-i18n="tabs.research">Research</button>
+  </nav>
+
+  <p id="status-msg" class="ws-status" hidden></p>
+
+  <main id="app">
+    <section id="unsupported-notice" class="ws-notice" hidden data-i18n="notice.unsupportedPage">
+      This page can't be scraped (browser/internal pages aren't supported).
+      Open a regular website and reopen the extension.
+    </section>
+
+    <div id="main-content">
+
+      <!-- ================= SCRAPE TAB ================= -->
+      <div class="ws-tab-panel" id="tab-panel-scrape" data-tab-panel="scrape">
+        <section id="scrape-workflow" class="ws-section ws-workflow">
+          <div id="scrape-workflow-steps" class="ws-workflow-steps">
+            <span class="ws-workflow-step" data-step="1" data-i18n="workflow.step1">1. Configure</span>
+            <span class="ws-workflow-step-arrow">→</span>
+            <span class="ws-workflow-step" data-step="2" data-i18n="workflow.step2">2. Run</span>
+            <span class="ws-workflow-step-arrow">→</span>
+            <span class="ws-workflow-step" data-step="3" data-i18n="workflow.step3">3. Review Results</span>
+          </div>
+          <p id="scrape-status-text" class="ws-note ws-workflow-status"></p>
+          <ol id="first-run-help" class="ws-note ws-first-run-help" hidden>
+            <li data-i18n="firstRunHelp.item1">Add or auto-detect columns</li>
+            <li data-i18n="firstRunHelp.item2">Preview the page</li>
+            <li data-i18n="firstRunHelp.item3">Review results</li>
+            <li data-i18n="firstRunHelp.item4">Save the scraper if desired</li>
+          </ol>
+          <button id="scrape-view-results-btn" class="ws-btn ws-btn-primary ws-btn-block" hidden data-i18n="workflow.viewResults">View Results →</button>
+        </section>
+
+        <!-- ============ V1 SIMPLIFIED SESSION WORKFLOW — primary path ============
+             Columns + the live setup preview + BAŞLA are the ENTIRE normal
+             V1 workflow now: no AUTO/MANUAL choice, no run-mode choice, no
+             separate Preview step. #columns-list/#columns-empty/
+             #add-column-btn/#auto-detect-btn ids and all their rendering/
+             picking code are completely unchanged — only relocated here
+             from inside the (now-advanced) manual-mode-content. -->
+        <!-- V1 SITE TEMPLATE AUTO-PERSIST: no Save/Update button anywhere
+             in this primary section — every column add/rename/reorder/
+             delete already calls the EXISTING persistState() ->
+             WSStorage.setState(hostname, state), which was already
+             per-hostname, config-only (never scraped rows), and already
+             fired automatically on every mutation before this pass. The
+             only change here is REMOVING the old explicit "Update"/"Save
+             as New Scraper" buttons from view — the underlying auto-
+             persistence needed no new code at all. -->
+        <section class="ws-section">
+          <div class="ws-section-title" data-i18n="columns.title">Columns</div>
+          <ul id="columns-list" class="ws-columns"></ul>
+          <p id="columns-empty" class="ws-empty" data-i18n="columns.empty">No columns yet. Add a column manually or use Auto Detect.</p>
+          <div class="ws-actions-row">
+            <button id="add-column-btn" class="ws-btn ws-btn-primary" data-i18n="columns.add">+ Add Column</button>
+          </div>
+        </section>
+
+        <!-- "Did I connect each column to the correct data?" — built
+             ENTIRELY from each column's own sampleValue captured at pick
+             time (see content/content.js), never a fresh page scan. -->
+        <div id="setup-preview-wrap" class="ws-table-wrap" hidden>
+          <table id="setup-preview-table"></table>
+        </div>
+
+        <button id="basla-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="liveSession.basla">BAŞLA</button>
+
+        <!-- ============ Gelişmiş (advanced/power-user escape hatch) ============
+             Everything the simplified spec asks to remove from the normal
+             workflow — AUTO detection, explicit Run Mode/pagination-mode
+             choice, Saved Scrapers, Templates, Structured Data — lives
+             here, always visible (no accordion — see UI SIMPLIFICATION
+             below). Nothing inside is deleted or behaviorally changed;
+             #preview-btn/#start-run-btn and their handlers (handlePreview/
+             handleStartRun) still work exactly as before for anyone who
+             opts in, entirely independent of BAŞLA/BİTİR and its own
+             separate chargeRunCredit call.
+
+             UI SIMPLIFICATION (real regression fix — this section used to
+             be a collapsed-by-default <details>/<summary> accordion):
+             converted to a plain always-visible <div>/heading — no
+             collapse/expand, no caret. popup.js's several
+             `els.scrapeAdvancedPanel.open = true` call sites (written
+             for the old <details> element) are harmless no-ops against a
+             plain <div> (setting `.open` on it does nothing) and were
+             deliberately left as-is rather than removed, per "do not
+             refactor underlying functionality just because a control is
+             hidden." -->
+        <div id="scrape-advanced-panel" class="ws-section">
+        <div class="ws-section-title" data-i18n="liveSession.advancedSummary">Gelişmiş</div>
+
+        <!-- UI SIMPLIFICATION (real regression fix): the old AUTO/MANUAL
+             mode switch (#scrape-mode-switch, #mode-auto-btn/#mode-
+             manual-btn) has been REMOVED from the UI — the main workflow
+             above already lets the user manually build columns via "+
+             Add Column" and pick elements on the page, so a second,
+             separate AUTO/MANUAL choice buried in Gelişmiş was
+             confusing/redundant. Only the control is gone: AUTO mode's
+             own scanning machinery (#auto-mode-panel, RUN_AUTO_DETECT,
+             handleScanPage/handleAutoExtract in popup.js) is untouched,
+             simply unreachable via UI now (decideInitialScrapeMode() in
+             popup.js was updated to always resolve 'manual' so this
+             section's real content — Auto Detect / Structured Data /
+             Templates / Verileri Çek / Sütunları Sıfırla — is what's
+             actually shown, for every install old and new). -->
+
+        <!-- Auto Detect / Structured Data / Templates — the three
+             promoted "Gelişmiş" actions (spec: "keep these advanced
+             controls"), shown first, directly under the heading. Ids/
+             handlers completely unchanged, only relocated. -->
+        <div class="ws-actions-row">
+          <button id="auto-detect-btn" class="ws-btn ws-btn-secondary" data-i18n="columns.autoDetect">✨ Auto Detect</button>
+          <button id="structured-data-btn" class="ws-chip-btn" data-i18n="columns.structuredData">🏷️ Structured Data</button>
+          <button id="templates-btn" class="ws-chip-btn" data-i18n="columns.templates">📋 Templates</button>
+        </div>
+
+        <!-- "Verileri Çek" (Preview) / "Sütunları Sıfırla" (Reset Columns)
+             — relocated here from the very end of the old advanced
+             section (were #preview-btn/#reset-btn there); same ids, same
+             handlers (handlePreview/handleReset), completely unchanged. -->
+        <button id="preview-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="scrape.preview">Preview</button>
+        <button id="reset-btn" class="ws-btn ws-btn-danger ws-btn-block" data-i18n="scrape.resetColumns">Reset Columns</button>
+
+        <!-- ============ AUTO MODE ============
+             Reuses the EXISTING RUN_AUTO_DETECT / SCAN_STRUCTURED_DATA
+             content-script messages and the EXISTING handlePreview()
+             (Current Page) run path — see handleScanPage()/
+             handleAutoExtract() in popup.js. No separate scraping engine,
+             no separate trial-charging path: Extract Data charges through
+             the exact same chargeRunCredit() call Manual Mode's Preview
+             button already uses. -->
+        <section id="auto-mode-panel" class="ws-section" hidden>
+          <p class="ws-note" data-i18n="autoMode.intro">Scan this page to automatically find useful data — no selectors or configuration needed.</p>
+          <button id="scan-page-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="autoMode.scanPage">🔍 Scan Page</button>
+          <p id="auto-scan-status" class="ws-note" style="margin-top:8px;"></p>
+
+          <div id="auto-scan-result" hidden style="margin-top:8px;">
+            <p id="auto-scan-summary" class="ws-note ws-workflow-status"></p>
+            <p id="auto-scan-low-confidence-note" class="ws-note" hidden data-i18n="autoMode.lowConfidence">We found possible fields. Review them before extracting.</p>
+            <!-- V1 AUTO DETECTION IMPROVEMENT spec #3/#11: only shown when
+                 two (or more) meaningfully repeated datasets are close in
+                 score — "show the user the candidates instead of silently
+                 choosing badly." The strongest candidate is always
+                 selected by default (spec: "Default to the strongest
+                 candidate"). Hidden entirely on an ordinary, unambiguous
+                 page — never adds a step to the common case. -->
+            <div id="auto-scan-candidates" class="ws-panel-inline" hidden style="margin-bottom:8px;">
+              <label data-i18n="autoMode.multipleDatasets">Detected data:</label>
+              <div id="auto-scan-candidates-list"></div>
+            </div>
+            <div id="auto-scan-fields-list" class="ws-ad-fields"></div>
+            <div id="auto-scan-preview-wrap" class="ws-table-wrap" style="margin-top:8px;max-height:140px;">
+              <table id="auto-scan-preview-table"></table>
+            </div>
+            <button id="auto-extract-btn" class="ws-btn ws-btn-primary ws-btn-block" style="margin-top:8px;" data-i18n="autoMode.extractData">Extract Data</button>
+            <button type="button" id="auto-switch-to-manual-btn" class="ws-chip-btn" style="margin-top:8px;" data-i18n="autoMode.needMoreControl">Need more control? Switch to Manual</button>
+
+            <!-- V1 AUTO DETECTION DIAGNOSTICS (DEV ONLY) — same reachability
+                 contract as #settings-dev-switcher: `hidden` by default in
+                 the shipped HTML, only ever unhidden by popup.js after a
+                 real WSLicense.isDevelopmentInstall() check
+                 (chrome.management.getSelf().installType==='development')
+                 resolves true, which can never be true for a packaged/
+                 Chrome-Web-Store install. Never translated (data-i18n) —
+                 same intentional-English convention as every other dev/QA-
+                 only control in this project; this is not user-facing
+                 production copy. See scripts/release-check.js for the
+                 static check confirming this stays gated in production
+                 packaging. -->
+            <div id="auto-diag-panel" hidden style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
+              <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+              <button type="button" id="auto-diag-copy-btn" class="ws-chip-btn">📋 Copy AUTO Diagnostic</button>
+              <p id="auto-diag-status" class="ws-note" style="margin-top:4px;"></p>
+              <textarea id="auto-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <div id="manual-mode-content">
+        <!-- V1 UX WORKFLOW SIMPLIFICATION: Saved Scrapers must not dominate
+             the screen — collapsed by default behind the existing
+             details.ws-advanced pattern (already used for scroll/page/click
+             limits below), never open automatically. #scrapers-list/
+             #scrapers-empty/#scraper-load-status ids and all rendering code
+             are completely unchanged — only the wrapping tag changed. -->
+        <details class="ws-section ws-advanced">
+          <summary class="ws-section-title" data-i18n="savedScrapers.title">Saved Scrapers</summary>
+          <p id="scraper-load-status" class="ws-note ws-load-status"></p>
+          <ul id="scrapers-list" class="ws-scrapers"></ul>
+          <p id="scrapers-empty" class="ws-empty" data-i18n="savedScrapers.empty">No saved scrapers yet. Build some columns below, then Save Scraper.</p>
+          <!-- V1 SITE TEMPLATE AUTO-PERSIST: relocated out of the primary
+               Columns section (site-specific columns now auto-persist
+               with no explicit action needed) — this NAMED, multiple-
+               scrapers-per-site library concept is a separate, opt-in,
+               advanced feature, so its own explicit Save/Update controls
+               live here where that concept already lives. Ids/handlers
+               completely unchanged. -->
+          <button id="update-scraper-btn" class="ws-btn ws-btn-secondary ws-btn-block" hidden></button>
+          <button id="save-scraper-btn" class="ws-btn ws-btn-secondary ws-btn-block" hidden data-i18n="columns.saveAsNew">💾 Save as New Scraper</button>
+        </details>
+
+        <!-- V1.22: Templates — reusable starting configurations. Never
+             lock the user in: applying one just adds ordinary, fully
+             editable columns, same as Auto Detect/Structured Data. -->
+        <section id="templates-panel" class="ws-section" hidden>
+          <div class="ws-toolbar-head">
+            <div class="ws-section-title" data-i18n="templates.title">Templates</div>
+            <button id="tpl-close-btn" class="ws-chip-btn" data-i18n="templates.close">✕ Close</button>
+          </div>
+
+          <div id="tpl-list-view">
+            <p id="tpl-suggestion-note" class="ws-note" hidden style="color:#4338ca;"></p>
+            <div id="tpl-list" class="ws-templates-list"></div>
+            <div class="ws-actions-row">
+              <button id="tpl-import-btn" class="ws-btn ws-btn-secondary" data-i18n="templates.import">⬆ Import Template</button>
+              <button id="tpl-save-current-btn" class="ws-btn ws-btn-secondary" data-i18n="templates.saveCurrent">💾 Save Current as Template</button>
+            </div>
+            <input type="file" id="tpl-import-file" accept="application/json,.json" hidden />
+          </div>
+
+          <div id="tpl-preview-view" hidden>
+            <div class="ws-toolbar-head">
+              <div class="ws-section-title" id="tpl-preview-name"></div>
+              <button id="tpl-preview-back-btn" class="ws-chip-btn" data-i18n="templates.back">← Back</button>
+            </div>
+            <p id="tpl-preview-desc" class="ws-note"></p>
+            <p id="tpl-preview-note" class="ws-note" hidden style="color:#b45309;"></p>
+            <div id="tpl-preview-fields" class="ws-ad-fields"></div>
+            <p id="tpl-preview-unmatched" class="ws-note" hidden></p>
+            <div class="ws-panel-actions">
+              <button id="tpl-cancel-btn" class="ws-btn ws-btn-secondary" data-i18n="templates.cancel">Cancel</button>
+              <button id="tpl-apply-btn" class="ws-btn ws-btn-primary" data-i18n="templates.apply">Apply Template</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- V1.21: Structured Data inspector — lets the user browse
+             JSON-LD/metadata detected on the CURRENT page and add any of
+             it as scraper columns, without writing a CSS selector. Never
+             starts anything on its own; Add is a fully separate, explicit
+             action, same "inspect first, commit second" pattern as
+             Auto Detect. -->
+        <section id="structured-data-panel" class="ws-section" hidden>
+          <div class="ws-toolbar-head">
+            <div class="ws-section-title" data-i18n="structuredData.title">Structured Data</div>
+            <span id="sd-summary-badge" class="ws-status-badge"></span>
+          </div>
+          <p id="sd-empty-note" class="ws-empty" hidden data-i18n="structuredData.empty">No structured data (JSON-LD or common page metadata) was found on this page.</p>
+          <p id="sd-errors-note" class="ws-note" hidden style="color:#b45309;"></p>
+          <div id="sd-fields-list" class="ws-ad-fields"></div>
+          <div class="ws-panel-actions">
+            <button id="sd-cancel-btn" class="ws-btn ws-btn-secondary" data-i18n="structuredData.cancel">Cancel</button>
+            <button id="sd-add-btn" class="ws-btn ws-btn-primary" data-i18n="structuredData.addSelected">Add Selected Fields</button>
+          </div>
+        </section>
+
+        <section id="auto-detect-panel" class="ws-section" hidden>
+          <div class="ws-toolbar-head">
+            <div class="ws-section-title" data-i18n="autoDetect.title">Auto Detect</div>
+            <span id="ad-confidence-badge" class="ws-status-badge"></span>
+          </div>
+
+          <label data-i18n="autoDetect.structureLabel" style="display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#6b7280;margin-bottom:3px;">Structure</label>
+          <select id="ad-structure-select" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;margin-bottom:4px;"></select>
+          <p id="ad-structure-meta" class="ws-note" style="margin:0 0 8px;"></p>
+
+          <div id="ad-fields-list" class="ws-ad-fields"></div>
+
+          <div id="ad-preview-wrap" class="ws-table-wrap" style="margin-top:8px;max-height:140px;">
+            <table id="ad-preview-table"></table>
+          </div>
+
+          <div class="ws-panel-actions">
+            <button id="ad-cancel-btn" class="ws-btn ws-btn-secondary" data-i18n="autoDetect.cancel">Cancel</button>
+            <button id="ad-use-btn" class="ws-btn ws-btn-primary" data-i18n="autoDetect.useSelected">Use Selected Fields</button>
+          </div>
+        </section>
+
+        <!-- V1 UX WORKFLOW SIMPLIFICATION: Current Page / Auto Scroll /
+             Multi-page / Load More + all their config panels live behind
+             one "Advanced Settings" disclosure, collapsed by default —
+             #run-section itself and every id inside it are completely
+             unchanged, only the new outer wrapper is added.
+             onRunModeChanged()/showRunSetupUI() (popup.js) auto-open this
+             wrapper whenever a non-Current-Page mode is selected or
+             restored, so it's never accidentally hidden from a user who
+             already configured one. -->
+        <details id="run-section-advanced" class="ws-section ws-advanced">
+          <summary class="ws-section-title" data-i18n="runMode.advancedSettingsSummary">Advanced Settings</summary>
+        <section id="run-section" class="ws-section">
+          <div class="ws-section-title" data-i18n="runMode.title">Run Mode</div>
+          <div class="ws-radio-row ws-radio-col">
+            <label><input type="radio" name="run-mode" value="current-page" checked /> <span data-i18n="runMode.currentPage">Current Page</span></label>
+            <label><input type="radio" name="run-mode" value="auto-scroll" /> <span data-i18n="runMode.autoScroll">Auto Scroll / Infinite Scroll</span></label>
+            <label><input type="radio" name="run-mode" value="multi-page" /> <span data-i18n="runMode.multiPage">Multi-Page (Pagination)</span></label>
+            <label><input type="radio" name="run-mode" value="load-more" /> <span data-i18n="runMode.loadMore">Load More</span></label>
+          </div>
+
+          <!-- V1.19 #2: conservative, suggestion-only pagination detection —
+               never starts navigation on its own; the user still has to
+               press "Use Detected" (which just fills in the fields below,
+               exactly as a manual pick/entry would) or "Pick Manually". -->
+          <div id="pagination-detect-wrap" class="ws-panel-inline" hidden>
+            <button id="detect-pagination-btn" class="ws-btn ws-btn-secondary ws-btn-block" data-i18n="pagination.autoDetectBtn">🔎 Auto-Detect Pagination</button>
+            <div id="pagination-detect-result" hidden>
+              <div class="ws-toolbar-head">
+                <span id="pd-summary-text" class="ws-note" style="margin:0;">Detected: —</span>
+                <span id="pd-confidence-badge" class="ws-status-badge"></span>
+              </div>
+              <div class="ws-actions-row">
+                <button id="pd-use-btn" class="ws-btn ws-btn-primary" data-i18n="pagination.useDetected">Use Detected</button>
+                <button id="pd-dismiss-btn" class="ws-btn ws-btn-secondary" data-i18n="pagination.pickManually">Pick Manually</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="auto-scroll-options" class="ws-panel-inline" hidden>
+            <details class="ws-advanced">
+              <summary>Advanced (scroll limits)</summary>
+              <label>Max Rows</label>
+              <input type="number" id="as-max-rows" value="1000" min="1" step="1" />
+              <label>Max Scrolls</label>
+              <input type="number" id="as-max-scrolls" value="100" min="1" step="1" />
+            </details>
+          </div>
+
+          <div id="multi-page-options" class="ws-panel-inline" hidden>
+            <label>Pagination Method</label>
+            <select id="mp-method">
+              <option value="nextButton">Next Button</option>
+              <option value="urlPattern">URL Pattern</option>
+            </select>
+
+            <div id="mp-next-button-config">
+              <label>Next Button</label>
+              <div id="next-button-status" class="ws-note" style="margin:0 0 6px;">Not set</div>
+              <button id="select-next-btn" class="ws-btn ws-btn-secondary ws-btn-block">Select Next Button</button>
+            </div>
+
+            <div id="mp-url-pattern-config" hidden>
+              <div id="url-pattern-status" class="ws-note" style="margin:0 0 6px;">Not detected — use Auto-Detect Pagination above, or configure manually.</div>
+              <label>URL Parameter</label>
+              <select id="url-pattern-key">
+                <option value="query:page">page (?page=N)</option>
+                <option value="query:p">p (?p=N)</option>
+                <option value="query:pg">pg (?pg=N)</option>
+                <option value="query:start">start (?start=N)</option>
+                <option value="query:offset">offset (?offset=N)</option>
+                <option value="path:page">/page/N (path)</option>
+              </select>
+              <label>Starting Value</label>
+              <input type="number" id="url-pattern-start" min="0" step="1" value="1" />
+              <label>Step (increment per page)</label>
+              <input type="number" id="url-pattern-step" min="1" step="1" value="1" />
+            </div>
+
+            <details class="ws-advanced">
+              <summary>Advanced (page limits)</summary>
+              <label>Max Pages</label>
+              <input type="number" id="mp-max-pages" value="10" min="1" step="1" />
+              <label>Max Rows</label>
+              <input type="number" id="mp-max-rows" value="1000" min="1" step="1" />
+              <label>Delay Between Pages (ms)</label>
+              <input type="number" id="mp-delay-ms" value="0" min="0" step="100" />
+              <label>Retry Count</label>
+              <input type="number" id="mp-retry-count" value="0" min="0" max="5" step="1" />
+            </details>
+          </div>
+
+          <div id="load-more-options" class="ws-panel-inline" hidden>
+            <label>Load More Button</label>
+            <div id="lm-button-status" class="ws-note" style="margin:0 0 6px;">Not set</div>
+            <button id="select-load-more-btn" class="ws-btn ws-btn-secondary ws-btn-block">Select Load More Button</button>
+            <details class="ws-advanced">
+              <summary>Advanced (click limits)</summary>
+              <label>Max Clicks</label>
+              <input type="number" id="lm-max-clicks" value="30" min="1" step="1" />
+              <label>Max Rows</label>
+              <input type="number" id="lm-max-rows" value="1000" min="1" step="1" />
+              <label>Delay Between Clicks (ms)</label>
+              <input type="number" id="lm-delay-ms" value="0" min="0" step="100" />
+              <label>Retry Count</label>
+              <input type="number" id="lm-retry-count" value="0" min="0" max="5" step="1" />
+            </details>
+          </div>
+
+          <div id="run-dedupe-options" class="ws-panel-inline" hidden>
+            <label>Duplicate Detection</label>
+            <select id="run-dedupe-key">
+              <option value="entire-row">Entire Row</option>
+            </select>
+          </div>
+
+          <button id="start-run-btn" class="ws-btn ws-btn-primary ws-btn-block" hidden data-i18n="runMode.start">Start</button>
+        </section>
+        </details>
+
+        <section id="run-progress-section" class="ws-section" hidden>
+          <div class="ws-section-title">
+            <span data-i18n="runStatus.title">Run Status</span> <span id="run-status-badge" class="ws-status-badge">IDLE</span>
+          </div>
+          <p id="run-progress-text" class="ws-note" style="margin-bottom:4px;"></p>
+          <p id="run-retry-status" class="ws-note" hidden style="font-size:11px;color:#b45309;"></p>
+          <div class="ws-actions-row">
+            <button id="pause-run-btn" class="ws-btn ws-btn-secondary" data-i18n="runStatus.pause">Pause</button>
+            <button id="stop-run-btn" class="ws-btn ws-btn-danger" data-i18n="runStatus.stop">Stop</button>
+            <button id="resume-run-btn" class="ws-btn ws-btn-primary" hidden data-i18n="runStatus.resume">Resume</button>
+            <button id="view-run-results-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="runStatus.viewResults">View Results</button>
+          </div>
+        </section>
+
+        </div><!-- /#manual-mode-content -->
+        </div><!-- /#scrape-advanced-panel -->
+      </div>
+
+      <!-- ================= RESULTS TAB ================= -->
+      <div class="ws-tab-panel" id="tab-panel-results" data-tab-panel="results" hidden>
+        <div id="results-empty-wrap" class="ws-section">
+          <p id="results-empty" class="ws-empty" data-i18n="results.emptyTitle">No results yet. Configure and run a scraper first.</p>
+          <button id="results-go-scrape-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="results.goToScrape">Go to Scrape</button>
+        </div>
+
+        <section id="preview-section" class="ws-section" hidden>
+          <div class="ws-toolbar-head">
+            <div class="ws-section-title">
+              <span data-i18n="results.title">Results</span> <span id="row-count" class="ws-row-count"></span>
+            </div>
+          </div>
+          <p id="results-status-text" class="ws-note ws-workflow-status"></p>
+
+          <!-- ============ V1 SIMPLIFIED SESSION WORKFLOW ============
+               Shown only while/after a BAŞLA-started live-collect
+               session exists for this page (see popup.js's
+               renderLiveSessionUI) — a Preview/advanced-flow result
+               never shows this at all, and keeps working exactly as
+               before with the "Next Actions"/export UI always visible. -->
+          <p id="live-session-status" class="ws-note ws-workflow-status" hidden></p>
+          <button id="bitir-btn" class="ws-btn ws-btn-primary ws-btn-block" hidden data-i18n="liveSession.bitir">BİTİR</button>
+
+          <!-- V1 SIMPLIFIED SESSION WORKFLOW DIAGNOSTICS (DEV ONLY) — same
+               reachability contract as #auto-diag-panel above: `hidden` by
+               default in the shipped HTML, only ever unhidden by popup.js
+               after a real WSLicense.isDevelopmentInstall() check resolves
+               true, which can never be true for a packaged/Chrome-Web-
+               Store install. Never translated (data-i18n) — not
+               user-facing production copy. See scripts/release-check.js
+               for the static check confirming this stays gated. -->
+          <div id="session-diag-panel" hidden style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
+            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+            <button type="button" id="session-diag-copy-btn" class="ws-chip-btn">📋 Copy Session Diagnostic</button>
+            <p id="session-diag-status" class="ws-note" style="margin-top:4px;"></p>
+            <textarea id="session-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+          </div>
+
+          <!-- Everything below (Next Actions, Export, Assets, Change
+               Tracking, Deep Scraping) is the "final download/export
+               workflow" the spec says must wait for BİTİR — gated by
+               hiding this whole wrapper while a live session is still
+               'active'. Completely unaffected for every other path
+               (no session at all, or a 'finished' one) — always visible,
+               exactly as before this feature existed. -->
+          <div id="export-gate">
+          <!-- ============ V1 WORKFLOW REORG — "Next Actions" ============
+               Step 3 of the core workflow (Collect -> Review -> Next
+               Action). Reuses the EXISTING switchTab('monitor')/
+               switchTab('research') navigation and the EXISTING Export
+               Options panel — no duplicated Monitor/Research/Export
+               logic, just a clearer, more prominent entry point plus
+               (for Monitor) passing along which saved scraper the
+               current results came from whenever one exists. -->
+          <div id="results-next-actions" class="ws-next-actions">
+            <div class="ws-next-actions-title" data-i18n="results.nextActionsTitle">What would you like to do next?</div>
+            <div class="ws-toolbar-row">
+              <button id="results-export-data-btn" class="ws-btn ws-btn-secondary" data-i18n="results.exportData">Export Data</button>
+              <button id="results-go-monitor-btn" class="ws-btn ws-btn-secondary" data-i18n="results.monitorChanges">Monitor Changes</button>
+              <button id="results-go-research-btn" class="ws-btn ws-btn-secondary" data-i18n="results.createResearchPackage">Create Research Package</button>
+            </div>
+          </div>
+
+          <div class="ws-toolbar-group-label" data-i18n="results.dataGroupLabel">Data</div>
+          <div class="ws-toolbar-row">
+            <button id="toggle-transform-btn" class="ws-chip-btn" data-i18n="results.transform">🧹 Transform</button>
+            <button id="toggle-filter-btn" class="ws-chip-btn" data-i18n="results.filter">Filter</button>
+            <button id="toggle-sort-btn" class="ws-chip-btn" data-i18n="results.sort">Sort</button>
+            <button id="toggle-dedupe-btn" class="ws-chip-btn" data-i18n="results.removeDuplicates">Remove Duplicates</button>
+            <button id="reset-results-btn" class="ws-chip-btn ws-chip-btn-warn" hidden data-i18n="results.resetResults">Reset Results</button>
+          </div>
+
+          <div id="transform-panel" class="ws-panel-inline" hidden>
+            <div id="transforms-history-wrap">
+              <label>Transforms</label>
+              <ol id="transforms-history-list" class="ws-transform-history"></ol>
+              <p id="transforms-history-empty" class="ws-note" style="margin:2px 0 8px;">No transforms applied yet.</p>
+              <div class="ws-actions-row" style="margin-bottom:8px;">
+                <button id="undo-last-transform-btn" class="ws-btn ws-btn-secondary" disabled>Undo Last</button>
+                <button id="reset-transforms-btn" class="ws-btn ws-btn-danger" disabled>Reset Transforms</button>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12px;color:#374151;margin:0 0 6px;">
+                <input type="checkbox" id="tf-auto-apply-saved" checked style="margin:0;" /> Apply saved transforms automatically when running this Saved Scraper
+              </label>
+            </div>
+
+            <div id="tf-target-column-wrap" style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
+              <label style="margin-top:0;">Transform Column</label>
+              <select id="tf-column-select"></select>
+            </div>
+
+            <div style="margin-top:8px;">
+              <label>Presets</label>
+              <div class="ws-actions-row">
+                <select id="tf-preset-select" style="flex:1;">
+                  <option value="cleanText">Clean Text</option>
+                  <option value="normalizePrice">Normalize Price</option>
+                  <option value="normalizeUrl">Normalize URL</option>
+                  <option value="htmlToText">HTML to Text</option>
+                </select>
+                <button id="tf-add-preset-btn" class="ws-btn ws-btn-secondary" type="button">Add Preset</button>
+              </div>
+              <p class="ws-note" style="margin:2px 0 0;">Adds a ready-made sequence of steps to the column above — every step stays fully editable afterward.</p>
+            </div>
+
+            <label>Operation</label>
+            <select id="tf-operation-select">
+              <option value="trim">Trim</option>
+              <option value="collapseWhitespace">Collapse Whitespace</option>
+              <option value="removeLineBreaks">Remove Line Breaks</option>
+              <option value="normalizeLineBreaks">Normalize Line Breaks</option>
+              <option value="removeTabs">Remove Tabs</option>
+              <option value="removeInvisibleChars">Remove Invisible Characters</option>
+              <option value="normalizeUnicode">Normalize Unicode</option>
+              <option value="decodeHtmlEntities">Decode HTML Entities</option>
+              <option value="removeCurrency">Remove Currency Symbol</option>
+              <option value="extractNumber">Extract Number</option>
+              <option value="normalizeNumber">Normalize Number</option>
+              <option value="normalizeCurrency">Normalize Currency</option>
+              <option value="normalizePercentage">Normalize Percentage</option>
+              <option value="normalizeDate">Normalize Date</option>
+              <option value="normalizeBoolean">Normalize Boolean (Yes/No)</option>
+              <option value="findReplace">Find &amp; Replace</option>
+              <option value="regexReplace">Regex Replace</option>
+              <option value="regexExtract">Regex Extract</option>
+              <option value="changeCase">Change Case</option>
+              <option value="capitalizeFirst">Capitalize First Letter</option>
+              <option value="prefixSuffix">Add Prefix / Suffix</option>
+              <option value="removePrefix">Remove Prefix</option>
+              <option value="removeSuffix">Remove Suffix</option>
+              <option value="fillEmpty">Fill Empty / Missing Values</option>
+              <option value="normalizeUrl">Normalize URL</option>
+              <option value="removeTrackingParams">Remove Tracking Parameters</option>
+              <option value="extractDomain">Extract Domain</option>
+              <option value="stripHtml">Strip HTML</option>
+              <option value="substring">Substring</option>
+              <option value="split">Split Column</option>
+              <option value="combine">Combine Columns</option>
+            </select>
+
+            <div id="tf-find-replace-fields" class="ws-tf-option-group" hidden>
+              <label>Find</label>
+              <input type="text" id="tf-find-value" />
+              <label>Replace</label>
+              <input type="text" id="tf-replace-value" />
+              <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;"><input type="checkbox" id="tf-case-sensitive" style="margin:0;" /> Case sensitive</label>
+              <label>Occurrence</label>
+              <div class="ws-radio-row">
+                <label><input type="radio" name="tf-find-occurrence" id="tf-find-occurrence-all" value="all" checked /> All occurrences</label>
+                <label><input type="radio" name="tf-find-occurrence" id="tf-find-occurrence-first" value="first" /> First occurrence</label>
+              </div>
+            </div>
+
+            <div id="tf-regex-replace-fields" class="ws-tf-option-group" hidden>
+              <label>Pattern</label>
+              <input type="text" id="tf-regex-pattern" placeholder="e.g. \s+" />
+              <label>Flags</label>
+              <input type="text" id="tf-regex-flags" placeholder="e.g. g" value="g" />
+              <label>Replacement</label>
+              <input type="text" id="tf-regex-replacement" />
+            </div>
+
+            <div id="tf-regex-extract-fields" class="ws-tf-option-group" hidden>
+              <label>Pattern</label>
+              <input type="text" id="tf-extract-pattern" placeholder="e.g. Model:\s*([A-Za-z0-9-]+)" />
+              <label>Flags</label>
+              <input type="text" id="tf-extract-flags" />
+              <label>Group</label>
+              <input type="number" id="tf-extract-group" value="1" min="0" step="1" />
+              <label>If no match</label>
+              <select id="tf-extract-fallback">
+                <option value="empty">Use empty value</option>
+                <option value="original">Keep original value</option>
+              </select>
+              <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;"><input type="checkbox" id="tf-extract-all" style="margin:0;" /> Extract all matches (not just the first)</label>
+              <div id="tf-extract-join-wrap" hidden>
+                <label>Join matches with</label>
+                <input type="text" id="tf-extract-join" placeholder="e.g. , " value=", " />
+              </div>
+            </div>
+
+            <div id="tf-case-fields" class="ws-tf-option-group" hidden>
+              <label>Case</label>
+              <select id="tf-case-mode">
+                <option value="upper">UPPERCASE</option>
+                <option value="lower">lowercase</option>
+                <option value="title">Title Case</option>
+              </select>
+            </div>
+
+            <div id="tf-prefix-suffix-fields" class="ws-tf-option-group" hidden>
+              <label>Prefix</label>
+              <input type="text" id="tf-prefix-value" placeholder="e.g. SKU-" />
+              <label>Suffix</label>
+              <input type="text" id="tf-suffix-value" placeholder="e.g. .jpg" />
+            </div>
+
+            <div id="tf-remove-prefix-fields" class="ws-tf-option-group" hidden>
+              <label>Prefix to remove</label>
+              <input type="text" id="tf-remove-prefix-value" placeholder="e.g. SKU: " />
+              <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;"><input type="checkbox" id="tf-remove-prefix-case-sensitive" style="margin:0;" /> Case sensitive</label>
+            </div>
+
+            <div id="tf-remove-suffix-fields" class="ws-tf-option-group" hidden>
+              <label>Suffix to remove</label>
+              <input type="text" id="tf-remove-suffix-value" placeholder="e.g. .jpg" />
+              <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;"><input type="checkbox" id="tf-remove-suffix-case-sensitive" style="margin:0;" /> Case sensitive</label>
+            </div>
+
+            <div id="tf-fill-empty-fields" class="ws-tf-option-group" hidden>
+              <label>Also treat these as missing (comma-separated)</label>
+              <input type="text" id="tf-fill-match-values" placeholder="e.g. -, N/A, NA, null, None" />
+              <label>Action</label>
+              <select id="tf-fill-mode">
+                <option value="custom">Replace with custom value</option>
+                <option value="toEmpty">Convert to empty</option>
+              </select>
+              <label>Fill with</label>
+              <input type="text" id="tf-fill-value" placeholder="e.g. N/A" />
+            </div>
+
+            <div id="tf-normalize-number-fields" class="ws-tf-option-group" hidden>
+              <label>Format</label>
+              <select id="tf-number-mode">
+                <option value="auto">Auto-detect (default)</option>
+                <option value="us">US style (1,299.99)</option>
+                <option value="eu">European style (1.299,99)</option>
+                <option value="custom">Custom separators</option>
+              </select>
+              <div id="tf-number-custom-wrap" hidden>
+                <label>Decimal separator</label>
+                <input type="text" id="tf-number-decimal-sep" maxlength="1" value="." style="width:48px;" />
+                <label>Thousands separator</label>
+                <input type="text" id="tf-number-thousands-sep" maxlength="1" placeholder="(none)" style="width:48px;" />
+              </div>
+            </div>
+
+            <div id="tf-normalize-currency-fields" class="ws-tf-option-group" hidden>
+              <label>Mode</label>
+              <select id="tf-currency-mode">
+                <option value="normalizeValue">Normalize numeric value (removes symbol)</option>
+                <option value="removeSymbol">Remove currency symbol only</option>
+                <option value="keepText">Keep as-is</option>
+              </select>
+              <p class="ws-note" style="margin:2px 0 0;">No exchange-rate conversion is ever performed.</p>
+            </div>
+
+            <div id="tf-normalize-percentage-fields" class="ws-tf-option-group" hidden>
+              <label>Output as</label>
+              <select id="tf-percentage-mode">
+                <option value="asNumber">Number (e.g. 18.5)</option>
+                <option value="asDecimal">Decimal fraction (e.g. 0.185)</option>
+              </select>
+            </div>
+
+            <div id="tf-normalize-date-fields" class="ws-tf-option-group" hidden>
+              <label>If day/month is ambiguous (e.g. 01/02/2026)</label>
+              <select id="tf-date-order">
+                <option value="auto">Leave ambiguous dates unchanged</option>
+                <option value="dayFirst">Day comes first (DD/MM/YYYY)</option>
+                <option value="monthFirst">Month comes first (MM/DD/YYYY)</option>
+              </select>
+              <label>Output format</label>
+              <select id="tf-date-output-format">
+                <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                <option value="YYYY-MM-DD HH:mm">YYYY-MM-DD HH:mm</option>
+                <option value="iso">ISO-like (YYYY-MM-DDTHH:mm:ss)</option>
+              </select>
+              <p class="ws-note" style="margin:2px 0 0;">A date that can't be read safely is left unchanged — never guessed.</p>
+            </div>
+
+            <div id="tf-normalize-boolean-fields" class="ws-tf-option-group" hidden>
+              <label>Values meaning TRUE (comma-separated)</label>
+              <input type="text" id="tf-bool-true-values" placeholder="e.g. Yes, Y, 1, In Stock" />
+              <label>Values meaning FALSE (comma-separated)</label>
+              <input type="text" id="tf-bool-false-values" placeholder="e.g. No, N, 0, Out of Stock" />
+              <label>Output for TRUE</label>
+              <input type="text" id="tf-bool-output-true" placeholder="true" />
+              <label>Output for FALSE</label>
+              <input type="text" id="tf-bool-output-false" placeholder="false" />
+              <label>If a value matches neither list</label>
+              <select id="tf-bool-unmatched-mode">
+                <option value="keep">Keep original value</option>
+                <option value="empty">Convert to empty</option>
+                <option value="custom">Replace with custom value</option>
+              </select>
+              <div id="tf-bool-unmatched-value-wrap" hidden>
+                <label>Custom value</label>
+                <input type="text" id="tf-bool-unmatched-value" />
+              </div>
+            </div>
+
+            <div id="tf-extract-domain-fields" class="ws-tf-option-group" hidden>
+              <label>Extract</label>
+              <select id="tf-domain-part">
+                <option value="domain">Domain (example.com)</option>
+                <option value="hostname">Full hostname (www.example.com)</option>
+                <option value="origin">Origin (https://example.com)</option>
+                <option value="path">Path</option>
+                <option value="query">Query string</option>
+              </select>
+            </div>
+
+            <div id="tf-normalize-url-fields" class="ws-tf-option-group" hidden>
+              <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;"><input type="checkbox" id="tf-remove-fragment" style="margin:0;" /> Remove Fragment (#...)</label>
+            </div>
+
+            <div id="tf-substring-fields" class="ws-tf-option-group" hidden>
+              <label>Mode</label>
+              <select id="tf-substring-mode">
+                <option value="firstN">First N characters</option>
+                <option value="lastN">Last N characters</option>
+                <option value="range">Start/End index</option>
+              </select>
+              <div id="tf-substring-n-wrap">
+                <label>N</label>
+                <input type="number" id="tf-substring-n" value="10" min="0" step="1" />
+              </div>
+              <div id="tf-substring-range-wrap" hidden>
+                <label>Start index</label>
+                <input type="number" id="tf-substring-start" value="0" min="0" step="1" />
+                <label>End index</label>
+                <input type="number" id="tf-substring-end" placeholder="(end of string)" min="0" step="1" />
+              </div>
+            </div>
+
+            <div id="tf-split-fields" class="ws-tf-option-group" hidden>
+              <label>Split by</label>
+              <div class="ws-radio-row">
+                <label><input type="radio" name="tf-split-mode" value="delimiter" checked /> Delimiter</label>
+                <label><input type="radio" name="tf-split-mode" value="whitespace" /> Whitespace</label>
+                <label><input type="radio" name="tf-split-mode" value="regex" /> Regex</label>
+              </div>
+              <div id="tf-split-delimiter-wrap">
+                <label>Delimiter</label>
+                <input type="text" id="tf-split-delimiter" placeholder="e.g. |" />
+              </div>
+              <div id="tf-split-regex-wrap" hidden>
+                <label>Pattern</label>
+                <input type="text" id="tf-split-pattern" />
+                <label>Flags</label>
+                <input type="text" id="tf-split-flags" />
+              </div>
+              <label>When it occurs multiple times</label>
+              <div class="ws-radio-row">
+                <label><input type="radio" name="tf-split-limit" value="first" /> Split at first match</label>
+                <label><input type="radio" name="tf-split-limit" value="all" checked /> Split all</label>
+              </div>
+              <label>Result</label>
+              <select id="tf-split-output-mode">
+                <option value="columns">New columns (one per part)</option>
+                <option value="firstPart">First part only</option>
+                <option value="lastPart">Last part only</option>
+                <option value="partByIndex">Part by index</option>
+                <option value="joinParts">Join selected parts</option>
+              </select>
+              <div id="tf-split-columns-wrap">
+                <label>New column names (comma-separated)</label>
+                <input type="text" id="tf-split-output-names" placeholder="e.g. Brand, Model" />
+                <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;"><input type="checkbox" id="tf-split-keep-original" style="margin:0;" /> Keep original column</label>
+              </div>
+              <div id="tf-split-part-index-wrap" hidden>
+                <label>Part index (0 = first)</label>
+                <input type="number" id="tf-split-part-index" value="0" min="0" step="1" />
+              </div>
+              <div id="tf-split-join-with-wrap" hidden>
+                <label>Join with</label>
+                <input type="text" id="tf-split-join-with" placeholder="e.g. space" value=" " />
+              </div>
+            </div>
+
+            <div id="tf-combine-fields" class="ws-tf-option-group" hidden>
+              <label>Source columns</label>
+              <div id="tf-combine-source-list" class="ws-checkbox-row"></div>
+              <label>Template</label>
+              <input type="text" id="tf-combine-template" placeholder="e.g. {Brand} {Model}" />
+              <p class="ws-note" style="margin:2px 0 0;">Use {ColumnName}. Leave empty to join with a space.</p>
+              <label>New column name</label>
+              <input type="text" id="tf-combine-output-name" placeholder="e.g. Full Name" />
+              <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;"><input type="checkbox" id="tf-combine-keep-original" style="margin:0;" /> Keep original columns</label>
+            </div>
+
+            <div id="tf-scope-wrap" hidden>
+              <label>Apply To</label>
+              <div class="ws-radio-row">
+                <label><input type="radio" name="tf-scope" value="all" checked /> All rows</label>
+                <label><input type="radio" name="tf-scope" value="filtered" /> Current filtered rows</label>
+              </div>
+            </div>
+
+            <div id="tf-destination-wrap" hidden style="margin-top:8px;border-top:1px solid #e5e7eb;padding-top:8px;">
+              <label style="margin-top:0;">Where should the result go?</label>
+              <div class="ws-radio-row">
+                <label><input type="radio" name="tf-destination" value="inPlace" checked /> Replace the column's value</label>
+                <label><input type="radio" name="tf-destination" value="newColumn" /> Create a new column</label>
+              </div>
+              <div id="tf-new-column-name-wrap" hidden>
+                <label>New column name</label>
+                <input type="text" id="tf-new-column-name" placeholder="e.g. Price Numeric" />
+              </div>
+            </div>
+
+            <p id="tf-preview-text" class="ws-note" style="margin-top:8px;white-space:pre-line;"></p>
+            <p id="tf-error-text" class="ws-note ws-tf-error" hidden></p>
+
+            <div class="ws-panel-actions">
+              <button id="tf-cancel-btn" class="ws-btn ws-btn-secondary">Cancel</button>
+              <button id="tf-apply-btn" class="ws-btn ws-btn-primary">Apply</button>
+            </div>
+          </div>
+
+          <div id="filter-panel" class="ws-panel-inline" hidden>
+            <label>Column</label>
+            <select id="filter-column"></select>
+            <label>Condition</label>
+            <select id="filter-condition"></select>
+            <label id="filter-value-label">Value</label>
+            <input id="filter-value" type="text" placeholder="e.g. 20" />
+            <div class="ws-panel-actions">
+              <button id="filter-clear-btn" class="ws-btn ws-btn-secondary">Clear Filter</button>
+              <button id="filter-apply-btn" class="ws-btn ws-btn-primary">Apply Filter</button>
+            </div>
+          </div>
+
+          <div id="sort-panel" class="ws-panel-inline" hidden>
+            <label>Sort by</label>
+            <select id="sort-column"></select>
+            <div class="ws-radio-row">
+              <label><input type="radio" name="sort-dir" value="asc" checked /> Ascending</label>
+              <label><input type="radio" name="sort-dir" value="desc" /> Descending</label>
+            </div>
+            <div class="ws-panel-actions">
+              <button id="sort-clear-btn" class="ws-btn ws-btn-secondary">Clear Sort</button>
+              <button id="sort-apply-btn" class="ws-btn ws-btn-primary">Apply Sort</button>
+            </div>
+          </div>
+
+          <div id="dedupe-panel" class="ws-panel-inline" hidden>
+            <label>Remove duplicates by</label>
+            <select id="dedupe-column">
+              <option value="entire-row">Entire Row</option>
+            </select>
+            <div class="ws-panel-actions">
+              <button id="dedupe-apply-btn" class="ws-btn ws-btn-primary ws-btn-block">Remove Duplicates</button>
+            </div>
+          </div>
+
+          <div id="preview-table-wrap" class="ws-table-wrap">
+            <table id="preview-table"></table>
+          </div>
+          <p id="preview-note" class="ws-note"></p>
+          <p id="anomaly-legend" class="ws-note" hidden>⚠ = possible mismatch — hover a row for details. Flagged rows are not removed from the export.</p>
+
+          <div class="ws-toolbar-group-label" data-i18n="export.groupLabel">Export</div>
+          <div class="ws-export-row">
+            <button id="export-csv-btn" class="ws-btn ws-btn-secondary" data-i18n="export.csv">CSV</button>
+            <button id="export-xlsx-btn" class="ws-btn ws-btn-secondary" data-i18n="export.excel">Excel</button>
+            <button id="export-json-btn" class="ws-btn ws-btn-secondary" data-i18n="export.json">JSON</button>
+            <div class="ws-copy-split">
+              <button id="copy-btn" class="ws-btn ws-btn-secondary" data-i18n="export.copy">Copy</button>
+              <select id="copy-format-select" title="Copy format">
+                <option value="tsv">TSV</option>
+                <option value="csv">CSV</option>
+                <option value="json">JSON</option>
+              </select>
+            </div>
+          </div>
+          <div class="ws-toolbar-row" style="margin-top:4px;">
+            <button id="toggle-export-options-btn" class="ws-chip-btn" data-i18n="export.options">⚙ Export Options</button>
+            <button id="export-ndjson-btn" class="ws-chip-btn" data-i18n="export.ndjson">NDJSON</button>
+            <button id="export-sheets-btn" class="ws-chip-btn" data-i18n="export.googleSheets">📊 Google Sheets</button>
+          </div>
+
+          <div id="export-options-panel" class="ws-panel-inline" hidden>
+            <label style="margin-top:0;">Columns to include</label>
+            <div id="export-column-list" class="ws-checkbox-row"></div>
+            <div class="ws-actions-row" style="margin:2px 0 8px;">
+              <button id="export-columns-all-btn" class="ws-btn ws-btn-secondary" type="button">Select All</button>
+              <button id="export-columns-none-btn" class="ws-btn ws-btn-secondary" type="button">Select None</button>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;">
+              <input type="checkbox" id="export-include-raw" style="margin:0;" /> Also include a "Raw &lt;Column&gt;" column for anything a transform changed
+            </label>
+
+            <label>CSV delimiter</label>
+            <select id="export-csv-delimiter">
+              <option value=",">Comma (,)</option>
+              <option value=";">Semicolon (;)</option>
+              <option value="&#9;">Tab</option>
+            </select>
+
+            <label>Filename</label>
+            <input type="text" id="export-filename-template" placeholder="{scraper}_{date}" />
+            <p class="ws-note" style="margin:2px 0 8px;">Tokens: {site} {scraper} {date} {time} {rows} {format}</p>
+
+            <p id="export-preview-text" class="ws-note" style="white-space:pre-line;"></p>
+
+            <div class="ws-panel-actions">
+              <button id="export-options-close-btn" class="ws-btn ws-btn-secondary">Close</button>
+            </div>
+          </div>
+
+          <div class="ws-toolbar-group-label" data-i18n="assets.groupLabel">Assets</div>
+          <div id="download-actions-row" class="ws-toolbar-row">
+            <button id="download-images-btn" class="ws-chip-btn" hidden data-i18n="assets.downloadImages">⬇ Download Images</button>
+            <button id="download-files-btn" class="ws-chip-btn" hidden data-i18n="assets.downloadFiles">⬇ Download Files</button>
+          </div>
+
+          <div id="download-setup-panel" class="ws-panel-inline" hidden>
+            <label>Column</label>
+            <select id="dl-column-select"></select>
+
+            <div id="dl-type-filter-wrap" hidden>
+              <label>File Types</label>
+              <div id="dl-type-filter-list" class="ws-checkbox-row"></div>
+            </div>
+
+            <details class="ws-advanced">
+              <summary>Advanced (filename, folder, duplicates)</summary>
+              <label>Filename Template</label>
+              <input type="text" id="dl-filename-template" placeholder="e.g. {Title}" />
+              <p class="ws-note" style="margin:2px 0 0;">Use {ColumnName} or {index}. Extension is added automatically.</p>
+
+              <label>Folder</label>
+              <input type="text" id="dl-folder-name" value="Web Scraper" />
+
+              <label>Duplicate URLs</label>
+              <div class="ws-radio-row">
+                <label><input type="radio" name="dl-dedupe" value="skip" checked /> Skip duplicates</label>
+                <label><input type="radio" name="dl-dedupe" value="keep" /> Keep duplicates</label>
+              </div>
+            </details>
+
+            <div id="dl-scope-wrap" hidden>
+              <label>Download</label>
+              <div class="ws-radio-row">
+                <label><input type="radio" name="dl-scope" value="filtered" checked /> Current filtered results</label>
+                <label><input type="radio" name="dl-scope" value="all" /> Entire dataset</label>
+              </div>
+            </div>
+
+            <p id="dl-preview-summary" class="ws-note" style="margin-top:8px;white-space:pre-line;"></p>
+
+            <div class="ws-panel-actions">
+              <button id="dl-cancel-btn" class="ws-btn ws-btn-secondary">Cancel</button>
+              <button id="dl-start-btn" class="ws-btn ws-btn-primary">Start Download</button>
+            </div>
+          </div>
+
+          <section id="download-progress-section" class="ws-section" hidden style="margin-top:10px;">
+            <div class="ws-toolbar-head">
+              <div class="ws-section-title" data-i18n="download.title">Download</div>
+              <span id="dl-status-badge" class="ws-status-badge">IDLE</span>
+            </div>
+            <p id="dl-progress-text" class="ws-note" style="margin-bottom:8px;"></p>
+            <p id="dl-folder-note" class="ws-note" style="margin-bottom:8px;"></p>
+            <div class="ws-actions-row">
+              <button id="dl-stop-btn" class="ws-btn ws-btn-danger" data-i18n="download.stop">Stop</button>
+              <button id="dl-retry-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="download.retryFailed">Retry Failed</button>
+              <button id="dl-done-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="download.done">Done</button>
+            </div>
+          </section>
+
+          <div class="ws-toolbar-group-label" data-i18n="changeTracking.groupLabel">Change Tracking</div>
+          <div class="ws-toolbar-row">
+            <button id="toggle-snapshots-btn" class="ws-chip-btn" data-i18n="changeTracking.snapshots">📸 Snapshots</button>
+          </div>
+
+          <div id="snapshots-panel" class="ws-panel-inline" hidden>
+            <details class="ws-advanced">
+              <summary>Advanced (compare key)</summary>
+              <label>Compare rows by</label>
+              <select id="compare-key-select"></select>
+            </details>
+            <p id="snapshot-duplicate-note" class="ws-note" hidden></p>
+            <p id="snapshot-info-text" class="ws-note" style="margin-top:8px;"></p>
+            <div class="ws-panel-actions">
+              <button id="save-snapshot-btn" class="ws-btn ws-btn-secondary" data-i18n="snapshots.saveCurrent">💾 Save Current Snapshot</button>
+              <button id="compare-snapshot-btn" class="ws-btn ws-btn-primary" hidden data-i18n="snapshots.compare">⇄ Compare with Previous</button>
+            </div>
+          </div>
+
+          <!-- ================= V1.18 DEEP SCRAPING ================= -->
+          <!-- Progressive disclosure (spec #1/#16): collapsed by default,
+               only appears once there are real results with a Link
+               column to follow. Normal scraping (CONFIGURE -> RUN ->
+               RESULTS) is completely unaffected either way. -->
+          <div class="ws-toolbar-group-label" data-i18n="deepScrape.groupLabel">Deep Scraping</div>
+          <div class="ws-toolbar-row">
+            <button id="toggle-deepscrape-btn" class="ws-chip-btn" data-i18n="deepScrape.toggle">🔗 Deep Scraping</button>
+          </div>
+
+          <div id="deepscrape-panel" class="ws-panel-inline" hidden>
+            <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;color:#111827;">
+              <input type="checkbox" id="ds-enabled" />
+              <span data-i18n="deepScrape.enableLabel">Enable Deep Scraping — visit each row's link and collect additional fields</span>
+            </label>
+
+            <div id="ds-config-body" hidden>
+              <label>Follow links from</label>
+              <select id="ds-source-column"></select>
+
+              <div class="ws-section-title" style="font-size:12px;margin-top:10px;" data-i18n="deepScrape.detailFieldsTitle">Detail Page Fields</div>
+              <ul id="ds-fields-list" class="ws-columns"></ul>
+              <p id="ds-fields-empty" class="ws-empty" data-i18n="deepScrape.fieldsEmpty">No detail fields yet — add one manually or pick fields visually on a sample page.</p>
+              <div class="ws-toolbar-row">
+                <button id="ds-add-field-btn" class="ws-chip-btn" data-i18n="deepScrape.addField">+ Add Detail Field</button>
+                <button id="ds-pick-fields-btn" class="ws-chip-btn" data-i18n="deepScrape.pickFields">🎯 Pick Fields on Sample Page</button>
+              </div>
+
+              <div id="ds-add-field-form" class="ws-panel-inline" hidden>
+                <label>Field Name</label>
+                <input type="text" id="ds-field-name" spellcheck="false" />
+                <label>Selector</label>
+                <input type="text" id="ds-field-selector" spellcheck="false" placeholder=".description" />
+                <label>Extraction Type</label>
+                <select id="ds-field-attribute">
+                  <option value="text">Text</option>
+                  <option value="html">HTML</option>
+                  <option value="href">Link URL</option>
+                  <option value="src">Image source</option>
+                  <option value="alt">Alt text</option>
+                  <option value="attr">Attribute…</option>
+                </select>
+                <div id="ds-field-attrname-row" hidden>
+                  <label>Attribute name</label>
+                  <input type="text" id="ds-field-attrname" spellcheck="false" placeholder="data-sku" />
+                </div>
+                <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;color:#111827;margin-top:8px;">
+                  <input type="checkbox" id="ds-field-multiple" />
+                  This may match multiple values — extract all
+                </label>
+                <div class="ws-panel-actions">
+                  <button id="ds-field-save-btn" class="ws-btn ws-btn-primary">Save Field</button>
+                  <button id="ds-field-cancel-btn" class="ws-btn ws-btn-secondary">Cancel</button>
+                </div>
+              </div>
+
+              <details class="ws-advanced">
+                <summary>Advanced (concurrency &amp; pacing)</summary>
+                <label>Concurrency</label>
+                <select id="ds-concurrency">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4" selected>4</option>
+                  <option value="5">5</option>
+                </select>
+                <label>Request delay</label>
+                <select id="ds-delay-mode">
+                  <option value="auto" selected>Auto / Safe Default</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <div id="ds-custom-delay-row" hidden>
+                  <label>Custom delay (ms)</label>
+                  <input type="number" id="ds-custom-delay" min="0" step="100" value="400" />
+                </div>
+                <label>Retry limit</label>
+                <select id="ds-retry-limit">
+                  <option value="1">1 (no retries)</option>
+                  <option value="2">2</option>
+                  <option value="3" selected>3 (default)</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                </select>
+              </details>
+
+              <p id="ds-workload-summary" class="ws-note" style="margin-top:8px;"></p>
+
+              <div class="ws-panel-actions">
+                <button id="ds-test-btn" class="ws-btn ws-btn-secondary" data-i18n="deepScrape.test">Test Detail Fields (sample)</button>
+                <button id="ds-start-btn" class="ws-btn ws-btn-primary" data-i18n="deepScrape.start">Start Deep Scrape</button>
+              </div>
+
+              <div id="ds-test-results" class="ws-note" hidden style="white-space:pre-line;margin-top:8px;"></div>
+            </div>
+          </div>
+
+          <section id="ds-progress-section" class="ws-section" hidden>
+            <div class="ws-section-title">
+              <span data-i18n="deepScrape.progressTitle">Deep Scraping</span> <span id="ds-progress-badge" class="ws-status-badge">RUNNING</span>
+            </div>
+            <p id="ds-progress-text" class="ws-note" style="margin-bottom:4px;"></p>
+            <p id="ds-progress-current" class="ws-note" style="font-size:11px;color:#6b7280;"></p>
+            <p id="ds-retry-status" class="ws-note" hidden style="font-size:11px;color:#b45309;"></p>
+            <div class="ws-actions-row">
+              <button id="ds-stop-btn" class="ws-btn ws-btn-danger" data-i18n="deepScrape.stop">Stop</button>
+              <button id="ds-retry-failed-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="deepScrape.retryFailed">Retry Failed</button>
+            </div>
+            <p id="ds-summary-text" class="ws-note" hidden style="white-space:pre-line;margin-top:8px;"></p>
+          </section>
+          </div><!-- /#export-gate -->
+        </section>
+
+        <section id="changes-section" class="ws-section" hidden>
+          <div class="ws-toolbar-head">
+            <div class="ws-section-title" data-i18n="changes.title">Changes</div>
+            <button id="changes-back-btn" class="ws-chip-btn" data-i18n="changes.back">← Back to Results</button>
+          </div>
+
+          <p id="changes-summary-text" class="ws-note" style="white-space:pre-line;margin:0 2px 8px;font-size:12px;color:#374151;"></p>
+          <p id="changes-duplicate-note" class="ws-note" hidden></p>
+
+          <div class="ws-toolbar-row">
+            <button id="changes-filter-all" class="ws-chip-btn ws-chip-active" data-filter="all" data-i18n="changes.filterAll">All</button>
+            <button id="changes-filter-new" class="ws-chip-btn" data-filter="new" data-i18n="changes.filterNew">New</button>
+            <button id="changes-filter-removed" class="ws-chip-btn" data-filter="removed" data-i18n="changes.filterRemoved">Removed</button>
+            <button id="changes-filter-changed" class="ws-chip-btn" data-filter="changed" data-i18n="changes.filterChanged">Changed</button>
+            <button id="changes-filter-price" class="ws-chip-btn" data-filter="price" data-i18n="changes.filterPrice">Price Changes</button>
+          </div>
+
+          <div id="changes-list" class="ws-change-list"></div>
+          <p id="changes-empty-note" class="ws-empty" hidden data-i18n="changes.empty">No changes in this category.</p>
+          <p id="changes-truncated-note" class="ws-note" hidden></p>
+
+          <div class="ws-export-row" style="margin-top:10px;">
+            <span class="ws-export-label" data-i18n="changes.exportLabel">Export Changes:</span>
+            <button id="export-changes-csv-btn" class="ws-btn ws-btn-secondary" data-i18n="export.csv">CSV</button>
+            <button id="export-changes-xlsx-btn" class="ws-btn ws-btn-secondary" data-i18n="export.excel">Excel</button>
+            <button id="export-changes-json-btn" class="ws-btn ws-btn-secondary" data-i18n="export.json">JSON</button>
+          </div>
+
+          <div class="ws-panel-inline" style="margin-top:10px;">
+            <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;font-size:12.5px;color:#374151;">
+              <input type="checkbox" id="save-snapshot-after-compare" checked style="margin:0;" />
+              <span data-i18n="changes.saveAsSnapshot">Save current results as a new snapshot</span>
+            </label>
+            <button id="save-after-compare-btn" class="ws-btn ws-btn-secondary ws-btn-block" style="margin-top:8px;margin-bottom:0;" data-i18n="changes.saveNow">Save Now</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- ================= MONITOR TAB ================= -->
+      <div class="ws-tab-panel" id="tab-panel-monitor" data-tab-panel="monitor" hidden>
+        <section class="ws-section">
+          <div class="ws-toolbar-head">
+            <div class="ws-section-title" data-i18n="monitor.title">📡 Monitoring</div>
+            <button type="button" id="monitor-back-to-results-btn" class="ws-chip-btn" data-i18n="results.backToResults">← Back to Results</button>
+          </div>
+          <div id="monitoring-summary" class="ws-monitor-summary" hidden></div>
+          <div id="monitoring-filters" class="ws-monitor-filters" role="group" aria-label="Filter monitoring cards" hidden>
+            <button type="button" class="ws-chip-btn ws-monitor-filter-btn" data-filter="all" data-i18n="monitor.filterAll">All</button>
+            <button type="button" class="ws-chip-btn ws-monitor-filter-btn" data-filter="changed" data-i18n="monitor.filterChanged">Changed</button>
+            <button type="button" class="ws-chip-btn ws-monitor-filter-btn" data-filter="errors" data-i18n="monitor.filterErrors">Errors</button>
+          </div>
+          <ul id="monitoring-list" class="ws-scrapers"></ul>
+          <p id="monitoring-empty" class="ws-empty" data-i18n="monitor.empty">No monitored scrapers yet. Save a scraper and enable monitoring.</p>
+          <p id="monitoring-filter-empty" class="ws-empty" hidden data-i18n="monitor.filterEmpty">No monitoring cards match this filter.</p>
+        </section>
+      </div>
+
+      <!-- ================= RESEARCH TAB ================= -->
+      <div class="ws-tab-panel" id="tab-panel-research" data-tab-panel="research" hidden>
+        <section class="ws-section">
+          <div class="ws-toolbar-head">
+            <div class="ws-section-title" data-i18n="research.title">Research Dataset Builder</div>
+            <button type="button" id="research-back-to-results-btn" class="ws-chip-btn" data-i18n="results.backToResults">← Back to Results</button>
+          </div>
+          <p id="research-explainer" class="ws-note" data-i18n="research.explainer">Build a structured research dataset from your current results.</p>
+          <p id="research-status-text" class="ws-note ws-workflow-status"></p>
+
+          <div id="research-empty-wrap">
+            <p id="research-tab-empty" class="ws-empty" data-i18n="research.empty">No data available yet.</p>
+            <button id="research-go-scrape-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="research.goToScrape">Go to Scrape</button>
+          </div>
+
+          <div class="ws-export-row">
+            <button id="research-bundle-btn" class="ws-btn ws-btn-primary" hidden data-i18n="research.createBundle">📦 Create Research Bundle</button>
+          </div>
+
+          <div id="research-setup-panel" class="ws-panel-inline" hidden>
+            <label data-i18n="research.datasetName">Dataset Name</label>
+            <input type="text" id="rb-dataset-name" placeholder="e.g. eBay Wireless Mouse Research" />
+
+            <label data-i18n="research.include">Include</label>
+            <div class="ws-checkbox-row">
+              <label><input type="checkbox" id="rb-include-csv" /> <span data-i18n="export.csv">CSV</span></label>
+              <label><input type="checkbox" id="rb-include-xlsx" /> <span data-i18n="export.excel">Excel</span></label>
+              <label><input type="checkbox" id="rb-include-json" /> <span data-i18n="export.json">JSON</span></label>
+              <label><input type="checkbox" id="rb-include-images" /> <span data-i18n="assets.downloadImages_plain">Images</span></label>
+              <label><input type="checkbox" id="rb-include-files" /> <span data-i18n="assets.downloadFiles_plain">Files</span></label>
+            </div>
+
+            <div id="rb-scope-wrap" hidden>
+              <label>Dataset</label>
+              <div class="ws-radio-row">
+                <label><input type="radio" name="rb-scope" value="filtered" checked /> Current filtered results</label>
+                <label><input type="radio" name="rb-scope" value="all" /> Entire dataset</label>
+              </div>
+            </div>
+
+            <details class="ws-advanced">
+              <summary>Advanced dataset options</summary>
+              <div id="rb-image-column-wrap" hidden>
+                <label>Image Column</label>
+                <select id="rb-image-column-select"></select>
+              </div>
+              <div id="rb-file-column-wrap" hidden>
+                <label>File Column</label>
+                <select id="rb-file-column-select"></select>
+              </div>
+            </details>
+
+            <p id="rb-preview-summary" class="ws-note" style="margin-top:8px;white-space:pre-line;"></p>
+
+            <div class="ws-panel-actions">
+              <button id="rb-cancel-btn" class="ws-btn ws-btn-secondary" data-i18n="research.cancel">Cancel</button>
+              <button id="rb-start-btn" class="ws-btn ws-btn-primary" data-i18n="research.createBundleBtn">Create Bundle</button>
+            </div>
+          </div>
+
+          <section id="research-progress-section" class="ws-section" hidden style="margin-top:10px;">
+            <div class="ws-toolbar-head">
+              <div id="rb-progress-title" class="ws-section-title" data-i18n="research.progressTitle">Creating Research Bundle</div>
+              <span id="rb-status-badge" class="ws-status-badge">IDLE</span>
+            </div>
+            <p id="rb-progress-text" class="ws-note" style="margin-bottom:8px;white-space:pre-line;"></p>
+            <p id="rb-folder-note" class="ws-note" style="margin-bottom:8px;"></p>
+            <div class="ws-actions-row">
+              <button id="rb-stop-btn" class="ws-btn ws-btn-danger" data-i18n="research.stop">Stop</button>
+              <button id="rb-retry-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="research.retryFailed">Retry Failed</button>
+              <button id="rb-done-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="research.done">Done</button>
+            </div>
+          </section>
+        </section>
+      </div>
+
+    </div>
+
+    <!-- ================= SETTINGS (V1.14, updated V1.15) ================= -->
+    <!-- A lightweight overlay screen, not a 5th tab (spec #5: "do not
+         clutter the four primary tabs") — opened via the ⚙ header
+         button, replaces main-content/tab-nav while open. -->
+    <div id="settings-panel" hidden>
+      <div class="ws-toolbar-head">
+        <div class="ws-section-title" data-i18n="settings.title">Settings</div>
+        <button type="button" id="settings-close-btn" class="ws-chip-btn" data-i18n="settings.back">← Back</button>
+      </div>
+
+      <section class="ws-section">
+        <div class="ws-section-title" data-i18n="settings.generalTitle">General</div>
+        <p class="ws-note"><span data-i18n="settings.licenseLabel">License:</span> <strong id="settings-license-text" data-i18n="settings.licenseFreeTrial">Free Trial</strong></p>
+        <p id="settings-license-summary" class="ws-note"></p>
+        <p id="settings-license-verification-note" class="ws-note ws-license-verification-note" hidden></p>
+        <button type="button" id="settings-unlock-btn" class="ws-btn ws-btn-primary ws-btn-block" style="margin-top:6px;" data-i18n="settings.unlock">Unlock Unlimited — $5</button>
+        <button type="button" id="settings-recover-btn" class="ws-chip-btn" style="margin-top:6px;" data-i18n="settings.recover">Already purchased? Recover your license</button>
+
+        <!-- V1.16: license recovery (spec #7) — a real production call
+             would POST an email/license key to the backend's
+             recover-license endpoint (see utils/license.js's
+             recoverLicense()); today it always returns an honest
+             "not connected yet" — never fakes success. -->
+        <div id="settings-recover-panel" class="ws-panel-inline" hidden style="margin-top:8px;">
+          <label data-i18n="settings.recoverEmailLabel">Email used at purchase</label>
+          <input type="email" id="settings-recover-email" placeholder="you@example.com" />
+          <div class="ws-panel-actions">
+            <button type="button" id="settings-recover-submit-btn" class="ws-btn ws-btn-primary" data-i18n="settings.recoverSubmit">Recover License</button>
+            <button type="button" id="settings-recover-cancel-btn" class="ws-btn ws-btn-secondary" data-i18n="settings.recoverCancel">Cancel</button>
+          </div>
+        </div>
+
+        <!-- V1 FINAL PART B spec #7: language selector — placed in
+             Settings so the primary Scrape workflow stays uncluttered
+             (same rationale as the pre-existing dev-license-switcher
+             below). Options are populated at runtime by popup.js from
+             WSI18n.SUPPORTED with native display names (spec #7 "display
+             native names"); changing the value calls WSI18n.setLanguage()
+             + re-renders the DOM immediately (spec #7 "no browser restart
+             required"). -->
+        <div id="settings-language-wrap" style="margin-top:10px;">
+          <label for="settings-language-select" data-i18n="settings.languageTitle">Language</label>
+          <select id="settings-language-select" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"></select>
+        </div>
+
+        <div id="settings-dev-switcher" hidden>
+          <p class="ws-note" style="margin-top:10px;"><em>Development mode detected (unpacked install) — this switches a SIMULATED license for local testing only, never available in a Chrome Web Store install, and never represents a real purchase.</em></p>
+          <div class="ws-radio-row">
+            <label><input type="radio" name="settings-dev-license" value="trial" /> Trial</label>
+            <label><input type="radio" name="settings-dev-license" value="licensed" /> Licensed (DEV)</label>
+            <label><input type="radio" name="settings-dev-license" value="revoked" /> Revoked (DEV)</label>
+          </div>
+
+          <!-- V1 FINAL PART C (spec #27-32) — QA trial-state harness.
+               Lives INSIDE #settings-dev-switcher on purpose: this whole
+               container is `hidden` by default and only ever unhidden by
+               handleOpenSettings() after an async isDevelopmentInstall()
+               check resolves true (chrome.management.getSelf().
+               installType === 'development') — the exact same gate the
+               pre-existing trial/licensed/revoked switcher above already
+               relies on. A packaged/Chrome-Web-Store install can never
+               see this DOM regardless of any CSS/attribute tampering,
+               because the buttons below are only ever WIRED to
+               WSLicense.setTrialRunsUsedDev()/resetToTrialDev() from
+               popup.js — there is no path to those functions except
+               through this gated UI. See scripts/release-check.js for
+               the automated check that fails a release build containing
+               a reachable path to this control. -->
+          <p class="ws-note" style="margin-top:10px;font-size:11px;"><em>QA: jump straight to a specific trial-run count for manual paywall testing.</em></p>
+          <div class="ws-actions-row" style="flex-wrap:wrap;">
+            <button type="button" id="qa-trial-state-a-btn" class="ws-chip-btn" data-qa-runs="0">A: 0 used (10 left)</button>
+            <button type="button" id="qa-trial-state-b-btn" class="ws-chip-btn" data-qa-runs="1">B: 1 used (9 left)</button>
+            <button type="button" id="qa-trial-state-c-btn" class="ws-chip-btn" data-qa-runs="9">C: 9 used (1 left)</button>
+            <button type="button" id="qa-trial-state-d-btn" class="ws-chip-btn" data-qa-runs="10">D: 10 used (0 left)</button>
+            <button type="button" id="qa-trial-state-e-btn" class="ws-chip-btn">E: Unlocked (QA)</button>
+            <button type="button" id="qa-trial-reset-btn" class="ws-chip-btn ws-chip-btn-warn">Reset QA Trial State</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="ws-section">
+        <div class="ws-section-title" data-i18n="settings.downloadsTitle">Downloads</div>
+        <p class="ws-note" data-i18n="settings.downloadsNote">Default Research Bundle formats (used until a Saved Scraper has its own preference):</p>
+        <div class="ws-checkbox-row">
+          <label><input type="checkbox" id="settings-rb-csv" /> <span data-i18n="export.csv">CSV</span></label>
+          <label><input type="checkbox" id="settings-rb-xlsx" /> <span data-i18n="export.excel">Excel</span></label>
+          <label><input type="checkbox" id="settings-rb-json" /> <span data-i18n="export.json">JSON</span></label>
+          <label><input type="checkbox" id="settings-rb-images" /> <span data-i18n="assets.downloadImages_plain">Images</span></label>
+          <label><input type="checkbox" id="settings-rb-files" /> <span data-i18n="assets.downloadFiles_plain">Files</span></label>
+        </div>
+      </section>
+
+      <section class="ws-section">
+        <div class="ws-section-title" data-i18n="settings.dataPrivacyTitle">Data &amp; Privacy</div>
+        <p class="ws-note" data-i18n="settings.dataPrivacyP1">Your scraper configurations, snapshots, monitoring history, preferences, and free-trial run count are stored locally in your browser (chrome.storage) — never uploaded anywhere.</p>
+        <p class="ws-note" data-i18n="settings.dataPrivacyP2">Scraped page content stays on your device. It only ever leaves the browser when YOU explicitly export it (CSV/Excel/JSON) or download images/files — both save directly to your own computer via Chrome's Downloads feature. Fetching images for a ZIP bundle downloads them straight from the site that hosts them, not through any Web Scraper server. This extension currently has no connected backend, no account system, and sends no analytics or telemetry of any kind.</p>
+        <p class="ws-note" data-i18n="settings.dataPrivacyP3">If you purchase or recover a license in a future version, only your email and license key are ever sent to Web Scraper's license server to verify your purchase — never any scraped page content or browsing data.</p>
+      </section>
+
+      <section class="ws-section">
+        <div class="ws-section-title" data-i18n="settings.aboutTitle">About</div>
+        <p class="ws-note"><span data-i18n="app.title">Web Scraper</span><br /><span data-i18n="settings.versionLabel">Version</span> <span id="settings-version-text"></span></p>
+        <p class="ws-note" data-i18n="settings.aboutDescription">No-code element picker, saved scrapers, transforms, exports, monitoring, and research dataset bundles — all running locally in your browser.</p>
+        <p class="ws-note">
+          <span id="settings-privacy-link" class="ws-placeholder-link" data-i18n="settings.privacyPolicyLink">Privacy Policy (coming soon)</span> ·
+          <span id="settings-support-link" class="ws-placeholder-link" data-i18n="settings.supportLink">Support (coming soon)</span> ·
+          <span id="settings-store-link" class="ws-placeholder-link" data-i18n="settings.storeLink">Chrome Web Store (coming soon)</span>
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= TRIAL-COMPLETE MODAL (V1.15) ================= -->
+  <!-- Replaces V1.14's per-feature "upgrade modal" entirely — there is
+       only ever ONE reason this shows now: the 10 free runs are used up.
+       Two actions: a real (but not-yet-wired, see utils/license.js)
+       purchase CTA, and "Maybe Later" which just dismisses — never a
+       checkout flow itself. -->
+  <div id="trial-modal-overlay" class="ws-modal-overlay" hidden>
+    <div class="ws-modal" role="dialog" aria-modal="true" aria-labelledby="trial-modal-title">
+      <h3 id="trial-modal-title" data-i18n="trialModal.title">Free trial complete</h3>
+      <p id="trial-modal-body" data-i18n="trialModal.body" data-i18n-params='{"count":10}'>You've used your 10 free scraping runs.</p>
+      <div class="ws-panel-actions">
+        <button type="button" id="trial-modal-unlock-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="trialModal.unlock">Unlock Unlimited — $5</button>
+        <button type="button" id="trial-modal-dismiss-btn" class="ws-btn ws-btn-secondary ws-btn-block" data-i18n="trialModal.maybeLater">Maybe Later</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../utils/storage.js"></script>
+  <script src="../utils/runstate.js"></script>
+  <script src="../utils/csv.js"></script>
+  <script src="../utils/zip.js"></script>
+  <script src="../utils/xlsx.js"></script>
+  <script src="../utils/results.js"></script>
+  <script src="../utils/recipes.js"></script>
+  <script src="../utils/templates.js"></script>
+  <script src="../utils/downloads.js"></script>
+  <script src="../utils/transforms.js"></script>
+  <script src="../utils/changes.js"></script>
+  <script src="../utils/snapshots.js"></script>
+  <script src="../utils/research.js"></script>
+  <script src="../utils/license.js"></script>
+  <script src="../utils/settings.js"></script>
+  <script src="../utils/i18n-data.js"></script>
+  <script src="../utils/i18n.js"></script>
+  <script src="../utils/destinations.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

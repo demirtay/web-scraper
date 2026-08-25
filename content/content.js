@@ -1,0 +1,973 @@
+/**
+ * content.js
+ * Runs in the page. Owns the element-picking UI (hover outline + naming
+ * panel, both rendered inside a shadow root so page CSS can't interfere)
+ * and answers messages from the popup:
+ *   - START_PICK: enter selection mode (purpose: 'column' [default] or
+ *     'next-button' — V1.3 reuses this exact same picker for selecting a
+ *     pagination "Next" control, see resolveNextButtonInfo/
+ *     renderNextButtonPanel below)
+ *   - RUN_EXTRACTION: run the stored columns against the live page
+ *
+ * The popup closes as soon as the user clicks anywhere on the page (normal
+ * browser behavior for extension popups), so once picking starts this
+ * script drives the whole flow on its own and writes the new column
+ * straight to chrome.storage.local (or, for a next-button pick, to
+ * chrome.storage.session — see below). The popup simply re-reads storage
+ * the next time it opens.
+ *
+ * Depends on WSStorage (utils/storage.js) and WSScraper/WSSelector
+ * (content/scraper.js, content/selector.js), all injected before this file.
+ * Auto Scroll / Multi-page run orchestration lives entirely in
+ * content/pagination.js, which registers its own separate
+ * chrome.runtime.onMessage listener — this file and its picking behavior
+ * are otherwise unchanged from V1.2.
+ */
+(function () {
+  'use strict';
+
+  // Guard against being injected twice into the same page.
+  if (window.__wsContentInjected) return;
+  window.__wsContentInjected = true;
+
+  var LOG_PREFIX = '[Web Scraper]';
+
+  // Defensive fallback for any environment without a real paint loop
+  // (some automated-testing DOM environments don't implement it) — real
+  // Chrome always has requestAnimationFrame, so this branch never runs
+  // there; it exists purely so the mousemove throttle below degrades
+  // gracefully instead of throwing.
+  var raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : function (cb) { return setTimeout(cb, 16); };
+
+  var pickModeActive = false;
+  var pickPurpose = 'column'; // 'column' | 'next-button' | 'detail-field'
+  var pickTargetHostname = null; // V1.18: which LIST page's Deep Scraping config a 'detail-field' pick stages into — see enterPickMode
+  var hoveredEl = null;
+  var shadowHost, shadowRoot, highlightEl, bannerEl, panelEl, hoverLabelEl;
+  var testerDebounceTimer = null; // V1.17: the current panel's live-selector-tester debounce handle, if any
+
+  function hostname() {
+    return location.hostname;
+  }
+
+  /**
+   * Resolves the *real* innermost element an event originated on, crossing
+   * open shadow-root boundaries that would otherwise cause `event.target`
+   * to be "retargeted" up to a shadow host (e.g. Reddit's <shreddit-post>)
+   * by a listener attached outside the shadow tree — which is exactly what
+   * previously made the picker highlight/select the whole post card
+   * instead of the specific field the mouse was over.
+   *
+   * event.composedPath()[0] is not subject to that retargeting: it's the
+   * deepest node the event actually hit, including nodes inside any OPEN
+   * shadow root. Closed shadow roots are never pierced — composedPath()
+   * simply stops at their host, same as this function.
+   */
+  function resolveEventTarget(e) {
+    if (typeof e.composedPath === 'function') {
+      var path = e.composedPath();
+      for (var i = 0; i < path.length; i++) {
+        if (path[i] && path[i].nodeType === 1) return path[i];
+      }
+    }
+    return e.target;
+  }
+
+  function ensureUI() {
+    if (shadowHost) return;
+
+    shadowHost = document.createElement('div');
+    shadowHost.style.all = 'initial';
+    document.body.appendChild(shadowHost);
+    shadowRoot = shadowHost.attachShadow({ mode: 'open' });
+
+    var style = document.createElement('style');
+    style.textContent =
+      '.ws-highlight{position:fixed;pointer-events:none;border:2px solid #4F46E5;' +
+      'background:rgba(79,70,229,0.15);border-radius:4px;z-index:2147483000;display:none;' +
+      'box-sizing:border-box;}' +
+      '.ws-banner{position:fixed;top:12px;left:50%;transform:translateX(-50%);' +
+      'background:#111827;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
+      'padding:8px 16px;border-radius:8px;z-index:2147483001;display:none;box-shadow:0 4px 12px rgba(0,0,0,0.25);}' +
+      '.ws-panel{position:fixed;bottom:20px;right:20px;width:300px;background:#fff;color:#111827;' +
+      'font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;border-radius:10px;' +
+      'box-shadow:0 8px 30px rgba(0,0,0,0.25);padding:14px;z-index:2147483002;display:none;}' +
+      '.ws-panel h3{margin:0 0 6px;font-size:14px;}' +
+      '.ws-panel .ws-meta{color:#6b7280;font-size:12px;margin-bottom:10px;}' +
+      '.ws-panel .ws-warn{color:#b91c1c;font-size:12px;margin-bottom:10px;}' +
+      '.ws-panel label{display:block;font-size:11px;font-weight:600;color:#6b7280;margin:8px 0 3px;' +
+      'text-transform:uppercase;letter-spacing:.03em;}' +
+      '.ws-panel input,.ws-panel select{width:100%;box-sizing:border-box;padding:6px 8px;' +
+      'border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit;}' +
+      '.ws-panel .ws-example{font-size:11.5px;color:#4338CA;background:#eef2ff;border-radius:6px;' +
+      'padding:5px 7px;margin-top:5px;word-break:break-all;max-height:54px;overflow-y:auto;}' +
+      '.ws-panel .ws-actions{display:flex;gap:8px;margin-top:12px;}' +
+      '.ws-panel button{flex:1;padding:7px 10px;border-radius:6px;border:none;font-size:13px;cursor:pointer;}' +
+      '.ws-btn-primary{background:#4F46E5;color:#fff;}' +
+      '.ws-btn-primary:hover{background:#4338CA;}' +
+      '.ws-btn-secondary{background:#f3f4f6;color:#111827;}' +
+      '.ws-btn-secondary:hover{background:#e5e7eb;}' +
+      // ---- V1.17 additions ----
+      '.ws-hover-label{position:fixed;pointer-events:none;background:#111827;color:#fff;' +
+      'font:11px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:2px 6px;' +
+      'border-radius:4px;z-index:2147483000;display:none;white-space:nowrap;}' +
+      '.ws-panel .ws-advanced-toggle{background:none;border:none;color:#4F46E5;font-size:11.5px;' +
+      'font-weight:600;cursor:pointer;padding:4px 0;text-align:left;flex:none;width:100%;}' +
+      '.ws-panel .ws-advanced-toggle:hover{text-decoration:underline;background:none;}' +
+      '.ws-panel .ws-advanced-section{border-top:1px solid #e5e7eb;margin-top:8px;padding-top:6px;}' +
+      '.ws-panel .ws-selector-row{display:flex;align-items:center;gap:6px;margin-top:2px;}' +
+      '.ws-panel .ws-selector-row input{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;}' +
+      '.ws-panel .ws-quality-tag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap;}' +
+      '.ws-panel .ws-quality-good{background:#ecfdf5;color:#047857;}' +
+      '.ws-panel .ws-quality-fair{background:#eef2ff;color:#4338ca;}' +
+      '.ws-panel .ws-quality-fragile{background:#fffbeb;color:#b45309;}' +
+      '.ws-panel .ws-tester-status{font-size:11.5px;color:#374151;margin-top:6px;}' +
+      '.ws-panel .ws-tester-status.ws-tester-invalid{color:#b91c1c;}' +
+      '.ws-panel .ws-tester-preview{font-size:11px;color:#4338CA;background:#eef2ff;border-radius:6px;' +
+      'padding:5px 7px;margin-top:4px;max-height:70px;overflow-y:auto;}' +
+      '.ws-panel .ws-tester-preview div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.ws-panel .ws-attr-name-row{margin-top:4px;}';
+    shadowRoot.appendChild(style);
+
+    highlightEl = document.createElement('div');
+    highlightEl.className = 'ws-highlight';
+    shadowRoot.appendChild(highlightEl);
+
+    hoverLabelEl = document.createElement('div');
+    hoverLabelEl.className = 'ws-hover-label';
+    shadowRoot.appendChild(hoverLabelEl);
+
+    bannerEl = document.createElement('div');
+    bannerEl.className = 'ws-banner';
+    bannerEl.textContent = 'Web Scraper: click an element to select it — Esc to cancel';
+    shadowRoot.appendChild(bannerEl);
+
+    panelEl = document.createElement('div');
+    panelEl.className = 'ws-panel';
+    shadowRoot.appendChild(panelEl);
+  }
+
+  function positionHighlight(el) {
+    var r = el.getBoundingClientRect();
+    highlightEl.style.left = r.left + 'px';
+    highlightEl.style.top = r.top + 'px';
+    highlightEl.style.width = r.width + 'px';
+    highlightEl.style.height = r.height + 'px';
+    highlightEl.style.display = 'block';
+  }
+
+  function hideHighlight() {
+    if (highlightEl) highlightEl.style.display = 'none';
+  }
+
+  // ---- V1.17 #3: Live Selector Tester — highlights every element the
+  // Advanced selector field currently matches on the real page. Uses a
+  // plain inline outline (restored exactly on clear) rather than a class
+  // toggle + injected global stylesheet rule, since it must reach elements
+  // OUTSIDE this file's own shadow root with zero risk of leaking a class
+  // name into the page's own CSS. Capped (MULTI_HIGHLIGHT_MAX) so a
+  // selector that matches thousands of elements on a huge page can never
+  // turn "highlight the matches" into a layout-thrashing loop (spec #14). ----
+  var MULTI_HIGHLIGHT_MAX = 60;
+  var multiHighlighted = []; // [{el, outline, outlineOffset}]
+
+  function clearMultiHighlight() {
+    multiHighlighted.forEach(function (entry) {
+      entry.el.style.outline = entry.outline;
+      entry.el.style.outlineOffset = entry.outlineOffset;
+    });
+    multiHighlighted = [];
+  }
+
+  function applyMultiHighlight(elements) {
+    clearMultiHighlight();
+    var capped = elements.slice(0, MULTI_HIGHLIGHT_MAX);
+    capped.forEach(function (el) {
+      if (!el || el.nodeType !== 1) return;
+      multiHighlighted.push({ el: el, outline: el.style.outline, outlineOffset: el.style.outlineOffset });
+      el.style.outline = '2px solid #059669';
+      el.style.outlineOffset = '1px';
+    });
+  }
+
+  // V1.17 #14 (performance): a page with heavy layout/paint cost (huge
+  // DOM, expensive CSS) firing mousemove at native rate can visibly
+  // stutter if every event does synchronous work. rAF-throttling collapses
+  // any burst of events between two paints into a single highlight
+  // update — position math + DOM writes never exceed one per frame,
+  // regardless of how fast the mouse actually moves.
+  var pendingMoveEvent = null;
+  var moveRafScheduled = false;
+
+  function onMouseMove(e) {
+    if (!pickModeActive) return;
+    pendingMoveEvent = e;
+    if (moveRafScheduled) return;
+    moveRafScheduled = true;
+    raf(function () {
+      moveRafScheduled = false;
+      var ev = pendingMoveEvent;
+      pendingMoveEvent = null;
+      if (!ev || !pickModeActive) return;
+      var el = resolveEventTarget(ev);
+      if (!el || el === hoveredEl || el === shadowHost) return;
+      hoveredEl = el;
+      positionHighlight(el);
+      updateHoverLabel(el);
+    });
+  }
+
+  /** Spec #1: "clearly show what will be selected" while hovering, BEFORE
+   * the user commits with a click. Deliberately cheap (tag + up to 2
+   * meaningful classes, no full selector generation) — this runs on every
+   * hovered element, so it must never do the same expensive uniqueness
+   * search buildRelativeSelector does. */
+  function quickDescribeElement(el) {
+    var tag = el.tagName.toLowerCase();
+    var classes = window.WSSelector && window.WSSelector.getStableClasses ? window.WSSelector.getStableClasses(el) : [];
+    var desc = tag;
+    if (classes.length) desc += '.' + classes.slice(0, 2).join('.');
+    return desc;
+  }
+
+  function updateHoverLabel(el) {
+    if (!hoverLabelEl) return;
+    hoverLabelEl.textContent = quickDescribeElement(el);
+    var r = el.getBoundingClientRect();
+    // Sits just above the highlighted box when there's room, otherwise
+    // just below it — never off-screen.
+    var top = r.top - 22;
+    hoverLabelEl.style.left = Math.max(4, r.left) + 'px';
+    hoverLabelEl.style.top = (top >= 0 ? top : r.bottom + 4) + 'px';
+    hoverLabelEl.style.display = 'block';
+  }
+
+  function hideHoverLabel() {
+    if (hoverLabelEl) hoverLabelEl.style.display = 'none';
+  }
+
+  function onClick(e) {
+    if (!pickModeActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    var resolved = resolveEventTarget(e);
+    var composedPath = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    console.log(LOG_PREFIX, 'pick click', {
+      'event.target': e.target,
+      'composedPath (innermost first)': composedPath,
+      'resolved target': resolved,
+      tagName: resolved && resolved.tagName,
+      textContent: resolved ? (resolved.textContent || '').trim().slice(0, 120) : ''
+    });
+
+    stopCapturing();
+    handlePicked(resolved);
+  }
+
+  function onKeyDown(e) {
+    if (e.key === 'Escape') {
+      exitPickMode();
+    }
+  }
+
+  function startCapturing() {
+    document.addEventListener('mousemove', onMouseMove, true);
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('keydown', onKeyDown, true);
+  }
+
+  // Stops hover/click interception (used once an element has been picked)
+  // but leaves Escape active so the naming panel can still be dismissed.
+  function stopCapturing() {
+    pickModeActive = false;
+    hoveredEl = null;
+    document.removeEventListener('mousemove', onMouseMove, true);
+    document.removeEventListener('click', onClick, true);
+    hideHighlight();
+    hideHoverLabel();
+    pendingMoveEvent = null;
+    if (bannerEl) bannerEl.style.display = 'none';
+  }
+
+  function enterPickMode(purpose, extra) {
+    ensureUI();
+    pickPurpose = purpose || 'column';
+    if (pickPurpose === 'detail-field') pickTargetHostname = (extra && extra.targetHostname) || pickTargetHostname;
+    pickModeActive = true;
+    bannerEl.textContent = pickPurpose === 'next-button'
+      ? 'Web Scraper: click the "Next" / pagination control — Esc to cancel'
+      : pickPurpose === 'detail-field'
+        ? 'Web Scraper: click a field to add it — pick as many as you need, Esc when done'
+        : 'Web Scraper: click an element to select it — Esc to cancel';
+    bannerEl.style.display = 'block';
+    panelEl.style.display = 'none';
+    startCapturing();
+  }
+
+  function exitPickMode() {
+    stopCapturing();
+    document.removeEventListener('keydown', onKeyDown, true);
+    if (panelEl) panelEl.style.display = 'none';
+    clearMultiHighlight();
+    if (testerDebounceTimer) { clearTimeout(testerDebounceTimer); testerDebounceTimer = null; }
+  }
+
+  function handlePicked(el) {
+    if (pickPurpose === 'next-button') {
+      var nbInfo = resolveNextButtonInfo(el);
+      console.log(LOG_PREFIX, 'next-button pick resolved', nbInfo);
+      renderNextButtonPanel(el, nbInfo);
+      return;
+    }
+    // V1.18 #3: picking a Detail Page field — the page being picked on
+    // has no "repeating container" concept of its own (it's a single
+    // detail record, exactly like pickElementInfo's existing null-
+    // container fallback), and results stage into a session key scoped
+    // to the ORIGINAL list page's hostname (pickTargetHostname, passed
+    // through START_PICK) rather than this page's own ws_state — the
+    // popup picks staged fields up when reopened there (see popup.js's
+    // checkForPendingDetailFieldPicks, mirroring the existing V1.3
+    // next-button-pick recovery pattern exactly).
+    if (pickPurpose === 'detail-field') {
+      var detailInfo = WSScraper.pickElementInfo(el, null);
+      var stagingKey = 'ws_detail_field_picks::' + (pickTargetHostname || hostname());
+      chrome.storage.session.get([stagingKey], function (result) {
+        var staged = (result && result[stagingKey]) || [];
+        renderPanel(el, { columns: staged }, detailInfo);
+      });
+      return;
+    }
+    WSStorage.getState(hostname()).then(function (state) {
+      var info = WSScraper.pickElementInfo(el, state.containerSelector);
+      console.log(LOG_PREFIX, 'pick resolved', {
+        'generated selector': info.relativeSelector,
+        'detected repeating container': info.containerSelector,
+        'selector match count': info.matchCount,
+        ok: info.ok,
+        reason: info.reason
+      });
+      renderPanel(el, state, info);
+    });
+  }
+
+  /**
+   * Resolves everything V1.3's pagination orchestration needs to
+   * re-locate and evaluate a "Next" control on future page loads: an
+   * absolute selector (reusing WSSelector.buildSelectorForElement
+   * unchanged — the same engine used for single-record pages), and a
+   * best-effort disabled/visibility check using only generic,
+   * non-site-specific signals.
+   */
+  function resolveNextButtonInfo(el) {
+    var selector = WSSelector.buildSelectorForElement(el);
+    return {
+      ok: !!selector,
+      relativeSelector: selector,
+      matchCount: selector ? WSSelector.countMatches(selector) : 0,
+      disabled: isLikelyDisabled(el),
+      tagName: el.tagName,
+      previewText: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+    };
+  }
+
+  function isLikelyDisabled(el) {
+    if (el.disabled) return true;
+    if (el.hasAttribute('disabled')) return true;
+    if (el.getAttribute('aria-disabled') === 'true') return true;
+    if (el.classList && Array.prototype.some.call(el.classList, function (c) { return /disabled/i.test(c); })) return true;
+    var style = window.getComputedStyle(el);
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0)) return true;
+    return false;
+  }
+
+  function renderNextButtonPanel(pickedEl, info) {
+    panelEl.innerHTML = '';
+    panelEl.style.display = 'block';
+
+    if (!info.ok) {
+      var warn = document.createElement('div');
+      warn.className = 'ws-warn';
+      warn.textContent = "Couldn't build a reliable selector for this element. Try a different one.";
+      panelEl.appendChild(warn);
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'ws-btn-secondary';
+      closeBtn.style.width = '100%';
+      closeBtn.textContent = 'Close';
+      closeBtn.addEventListener('click', exitPickMode);
+      panelEl.appendChild(closeBtn);
+      return;
+    }
+
+    var title = document.createElement('h3');
+    title.textContent = 'Confirm Next Button';
+    panelEl.appendChild(title);
+
+    if (info.disabled) {
+      var warn2 = document.createElement('div');
+      warn2.className = 'ws-warn';
+      warn2.textContent = '⚠ This element currently looks disabled — that’s fine if this page happens to be the last one, but double-check you picked the right control.';
+      panelEl.appendChild(warn2);
+    }
+
+    var meta = document.createElement('div');
+    meta.className = 'ws-meta';
+    meta.textContent = 'Matches ' + info.matchCount + ' element(s) on this page' +
+      (info.previewText ? ' — "' + info.previewText + '"' : '');
+    panelEl.appendChild(meta);
+
+    var actions = document.createElement('div');
+    actions.className = 'ws-actions';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'ws-btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    var confirmBtn = document.createElement('button');
+    confirmBtn.className = 'ws-btn-primary';
+    confirmBtn.textContent = 'Use This Button';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    panelEl.appendChild(actions);
+
+    cancelBtn.addEventListener('click', exitPickMode);
+    confirmBtn.addEventListener('click', function () {
+      var key = 'ws_next_button_pick::' + hostname();
+      var data = {};
+      data[key] = {
+        relativeSelector: info.relativeSelector,
+        matchCount: info.matchCount,
+        disabled: info.disabled,
+        previewText: info.previewText,
+        pickedAt: Date.now()
+      };
+      chrome.storage.session.set(data, exitPickMode);
+    });
+  }
+
+  function suggestColumnName(attribute, existingNames) {
+    var base = attribute === 'href' ? 'Link' : attribute === 'src' ? 'Image' : attribute === 'alt' ? 'Alt Text' : 'Column';
+    var name = base;
+    var n = 2;
+    while (existingNames.indexOf(name) !== -1) {
+      name = base + ' ' + n;
+      n++;
+    }
+    return name;
+  }
+
+  /**
+   * Builds the list of extraction-type options to offer for the picked
+   * element, tag-appropriate and ordered with the most likely choice
+   * first. Every option still gets computed against the *actual* clicked
+   * element (via WSSelector.extractValue) so the panel can show a live,
+   * truthful example rather than a generic description.
+   */
+  // V1.17 #1/#7: HTML and Attribute... are offered for every element type
+  // — an advanced escape hatch (arbitrary data-*/aria-*/any attribute, or
+  // raw inner HTML) that's useful regardless of tag, unlike text/href/src/
+  // alt which are genuinely tag-appropriate.
+  var ADVANCED_ATTRIBUTE_OPTIONS = [
+    { value: 'html', label: 'HTML content' },
+    { value: 'attr', label: 'Attribute…' }
+  ];
+
+  function attributeOptionsFor(el) {
+    var tag = el.tagName;
+    if (tag === 'A' || tag === 'AREA') {
+      return [
+        { value: 'text', label: 'Text content' },
+        { value: 'href', label: 'Link URL' }
+      ].concat(ADVANCED_ATTRIBUTE_OPTIONS);
+    }
+    if (tag === 'IMG') {
+      return [
+        { value: 'src', label: 'Image source' },
+        { value: 'alt', label: 'Alt text' }
+      ].concat(ADVANCED_ATTRIBUTE_OPTIONS);
+    }
+    // Generic element: offer everything, since it may contain a nested
+    // <a>/<img> that extractValue already knows how to fall back to.
+    return [
+      { value: 'text', label: 'Text content' },
+      { value: 'href', label: 'Link URL' },
+      { value: 'src', label: 'Image source' },
+      { value: 'alt', label: 'Alt text' }
+    ].concat(ADVANCED_ATTRIBUTE_OPTIONS);
+  }
+
+  function renderPanel(pickedEl, state, info) {
+    panelEl.innerHTML = '';
+    panelEl.style.display = 'block';
+
+    if (!info.ok) {
+      var msg = info.reason === 'outside-container'
+        ? 'This element is not inside the repeating item you picked earlier. Choose an element from the same type of card/row, or hit Reset in the popup to start over.'
+        : "Couldn't build a reliable selector for this element. Try a different one.";
+      var warn = document.createElement('div');
+      warn.className = 'ws-warn';
+      warn.textContent = msg;
+      panelEl.appendChild(warn);
+
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'ws-btn-secondary';
+      closeBtn.style.width = '100%';
+      closeBtn.textContent = 'Close';
+      closeBtn.addEventListener('click', exitPickMode);
+      panelEl.appendChild(closeBtn);
+      return;
+    }
+
+    var title = document.createElement('h3');
+    title.textContent = 'Name this column';
+    panelEl.appendChild(title);
+
+    var meta = document.createElement('div');
+    meta.className = 'ws-meta';
+    // V1.17 #1: match count in the spec's own worked-example wording.
+    meta.textContent = info.matchCount + ' match' + (info.matchCount === 1 ? '' : 'es') +
+      (info.previewText ? ' — "' + info.previewText.slice(0, 40) + '"' : '');
+    panelEl.appendChild(meta);
+
+    var nameLabel = document.createElement('label');
+    nameLabel.textContent = 'Column Name';
+    panelEl.appendChild(nameLabel);
+
+    var nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.spellcheck = false;
+    var existingNames = state.columns.map(function (c) { return c.name; });
+    nameInput.value = suggestColumnName(info.attribute, existingNames);
+    panelEl.appendChild(nameInput);
+
+    // V1.17 #1: a labeled, always-visible "Selector" read-out (spec's own
+    // basic-mode example: "Price / .product-card .price / 48 matches /
+    // Text") plus a compact quality tag — advanced technical REASONS stay
+    // out of the basic view (spec: "do not overwhelm normal users").
+    var selectorLabel = document.createElement('label');
+    selectorLabel.textContent = 'Selector';
+    panelEl.appendChild(selectorLabel);
+    var selectorRow = document.createElement('div');
+    selectorRow.className = 'ws-selector-row';
+    var selectorDisplay = document.createElement('div');
+    selectorDisplay.style.cssText = 'flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#374151;overflow-wrap:anywhere;';
+    var isStringSelector = typeof info.relativeSelector === 'string';
+    selectorDisplay.textContent = isStringSelector ? info.relativeSelector : '(inside shadow DOM — not directly editable)';
+    var qualityTagEl = document.createElement('span');
+    qualityTagEl.className = 'ws-quality-tag';
+    selectorRow.appendChild(selectorDisplay);
+    selectorRow.appendChild(qualityTagEl);
+    panelEl.appendChild(selectorRow);
+
+    function setQualityTag(selectorForScoring) {
+      var quality = WSSelector.scoreSelectorQuality(selectorForScoring);
+      qualityTagEl.textContent = quality.label;
+      qualityTagEl.className = 'ws-quality-tag ws-quality-' + quality.label.toLowerCase();
+      qualityTagEl.title = (quality.reasons || []).join('; ');
+      return quality;
+    }
+    setQualityTag(info.relativeSelector);
+
+    var attrLabel = document.createElement('label');
+    attrLabel.textContent = 'Extract';
+    panelEl.appendChild(attrLabel);
+
+    var attrSelect = document.createElement('select');
+    var options = attributeOptionsFor(pickedEl);
+    // Keep the suggested attribute selected if it's offered; otherwise
+    // default to the first (most likely) option for this element type.
+    var hasSuggested = options.some(function (o) { return o.value === info.attribute; });
+    options.forEach(function (opt) {
+      var o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.value === (hasSuggested ? info.attribute : options[0].value)) o.selected = true;
+      attrSelect.appendChild(o);
+    });
+    panelEl.appendChild(attrSelect);
+
+    // V1.17 #7: revealed only when "Attribute…" is chosen — the one
+    // extraction type that needs an extra piece of input to mean anything.
+    var attrNameRow = document.createElement('div');
+    attrNameRow.className = 'ws-attr-name-row';
+    attrNameRow.hidden = true;
+    var attrNameLabel = document.createElement('label');
+    attrNameLabel.textContent = 'Attribute name';
+    var attrNameInput = document.createElement('input');
+    attrNameInput.type = 'text';
+    attrNameInput.spellcheck = false;
+    attrNameInput.placeholder = 'data-product-id';
+    attrNameRow.appendChild(attrNameLabel);
+    attrNameRow.appendChild(attrNameInput);
+    panelEl.appendChild(attrNameRow);
+
+    var exampleEl = document.createElement('div');
+    exampleEl.className = 'ws-example';
+    panelEl.appendChild(exampleEl);
+
+    function updateExample() {
+      attrNameRow.hidden = attrSelect.value !== 'attr';
+      var val = WSSelector.extractValue(pickedEl, attrSelect.value, null, attrNameInput.value.trim());
+      exampleEl.textContent = val ? 'Example: ' + val.slice(0, 140) : 'Example: (empty on this element)';
+    }
+    attrSelect.addEventListener('change', updateExample);
+    attrNameInput.addEventListener('input', updateExample);
+    updateExample();
+
+    // =====================================================================
+    // V1.17 #3/#16: Advanced — Live Selector Tester, collapsed by default
+    // (progressive disclosure: spec #16 explicitly keeps this out of the
+    // default beginner path). Only offered when the generated selector is
+    // a plain string (not a shadow-DOM multi-hop array — editing THAT as
+    // free text has no safe, honest representation, so it's skipped with
+    // a clear explanation rather than silently broken — spec #15).
+    // =====================================================================
+    var effectiveSelector = info.relativeSelector;
+    var testerDebounceLocal = null;
+
+    if (isStringSelector) {
+      var advancedToggle = document.createElement('button');
+      advancedToggle.type = 'button';
+      advancedToggle.className = 'ws-advanced-toggle';
+      advancedToggle.textContent = '▸ Advanced';
+      panelEl.appendChild(advancedToggle);
+
+      var advancedSection = document.createElement('div');
+      advancedSection.className = 'ws-advanced-section';
+      advancedSection.hidden = true;
+
+      var testerLabel = document.createElement('label');
+      testerLabel.textContent = 'Test / edit selector';
+      var testerInput = document.createElement('input');
+      testerInput.type = 'text';
+      testerInput.spellcheck = false;
+      testerInput.value = info.relativeSelector;
+      var testerStatus = document.createElement('div');
+      testerStatus.className = 'ws-tester-status';
+      var testerPreview = document.createElement('div');
+      testerPreview.className = 'ws-tester-preview';
+      testerPreview.hidden = true;
+
+      advancedSection.appendChild(testerLabel);
+      advancedSection.appendChild(testerInput);
+      advancedSection.appendChild(testerStatus);
+      advancedSection.appendChild(testerPreview);
+      panelEl.appendChild(advancedSection);
+
+      advancedToggle.addEventListener('click', function () {
+        advancedSection.hidden = !advancedSection.hidden;
+        advancedToggle.textContent = (advancedSection.hidden ? '▸' : '▾') + ' Advanced';
+        if (advancedSection.hidden) clearMultiHighlight(); else runLiveSelectorTest(testerInput.value);
+      });
+
+      // The SAME containers the real scrape will use (spec: the tester
+      // must reflect actual extraction semantics, not a disconnected
+      // page-wide query) — mirrors content/scraper.js's runExtraction
+      // container resolution exactly.
+      var effectiveContainerSelector = state.containerSelector || info.containerSelector;
+      function resolveContainers() {
+        if (!effectiveContainerSelector) return [document.body];
+        try { return Array.prototype.slice.call(document.querySelectorAll(effectiveContainerSelector)); }
+        catch (e) { return []; }
+      }
+
+      function runLiveSelectorTest(rawSelector) {
+        clearMultiHighlight();
+        var trimmed = (rawSelector || '').trim();
+        if (!trimmed) {
+          testerStatus.className = 'ws-tester-status ws-tester-invalid';
+          testerStatus.textContent = 'Enter a selector to test.';
+          testerPreview.hidden = true;
+          return;
+        }
+        // WSSelector.queryFromScope() deliberately SWALLOWS a bad selector
+        // internally (returns null, same as "no match" — the right choice
+        // for real extraction, where a stale saved selector must never
+        // throw). The tester needs to tell those two cases apart for the
+        // user, so it validates syntax explicitly first, via the browser's
+        // own parser (document.querySelectorAll throws SyntaxError on
+        // genuinely invalid CSS) — :scope is skipped since it's this
+        // codebase's own sentinel, not real CSS syntax.
+        var sawError = false;
+        if (trimmed !== ':scope') {
+          try { document.querySelectorAll(trimmed); } catch (e) { sawError = true; }
+        }
+
+        var containers = resolveContainers();
+        var matchedEls = [];
+        var values = [];
+        if (!sawError) {
+          containers.forEach(function (containerEl) {
+            var el;
+            try {
+              el = trimmed === ':scope' ? containerEl : WSSelector.queryFromScope(containerEl, trimmed);
+            } catch (e) {
+              sawError = true;
+              return;
+            }
+            if (el) {
+              matchedEls.push(el);
+              var v = WSSelector.extractValue(el, attrSelect.value, containerEl, attrNameInput.value.trim());
+              if (v) values.push(v);
+            }
+          });
+        }
+
+        if (sawError) {
+          testerStatus.className = 'ws-tester-status ws-tester-invalid';
+          testerStatus.textContent = 'Invalid selector.';
+          testerPreview.hidden = true;
+          return;
+        }
+
+        testerStatus.className = 'ws-tester-status';
+        testerStatus.textContent = 'MATCHES: ' + matchedEls.length + (containers.length > 1 ? ' of ' + containers.length + ' items' : '');
+        if (matchedEls.length === 0) {
+          testerStatus.textContent = '0 matches';
+        }
+        setQualityTag(trimmed);
+        applyMultiHighlight(matchedEls);
+
+        if (values.length) {
+          testerPreview.hidden = false;
+          testerPreview.innerHTML = '';
+          values.slice(0, 5).forEach(function (v) {
+            var line = document.createElement('div');
+            line.textContent = v.length > 80 ? v.slice(0, 80) + '…' : v;
+            testerPreview.appendChild(line);
+          });
+        } else {
+          testerPreview.hidden = true;
+        }
+
+        // A validly-editing power user's chosen selector becomes what
+        // "Add Column" actually saves — this is the precise-control path
+        // spec #1 asks for ("a power user should be able to precisely
+        // control extraction").
+        effectiveSelector = trimmed;
+        selectorDisplay.textContent = trimmed;
+      }
+
+      testerInput.addEventListener('input', function () {
+        if (testerDebounceLocal) clearTimeout(testerDebounceLocal);
+        var val = testerInput.value;
+        // V1.17 #14: debounced — re-testing on every keystroke against a
+        // large page would repeatedly re-run querySelectorAll/extraction.
+        testerDebounceLocal = setTimeout(function () { runLiveSelectorTest(val); }, 200);
+        testerDebounceTimer = testerDebounceLocal;
+      });
+    }
+
+    // V1.18 #17/#18: a Detail Page field's selector may legitimately match
+    // MORE than one element on the page (a feature list, an image
+    // gallery) — offered ONLY for 'detail-field' picks, since a normal
+    // list-page column's relativeSelector is always evaluated per-row/
+    // per-container and "multiple" has no meaning there.
+    var multipleCheckbox = null;
+    if (pickPurpose === 'detail-field') {
+      var multipleRow = document.createElement('div');
+      multipleRow.className = 'ws-checkbox-row';
+      multipleRow.style.marginTop = '6px';
+      var multipleLabel = document.createElement('label');
+      multipleLabel.style.cssText = 'display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;color:#111827;margin:0;';
+      multipleCheckbox = document.createElement('input');
+      multipleCheckbox.type = 'checkbox';
+      multipleLabel.appendChild(multipleCheckbox);
+      multipleLabel.appendChild(document.createTextNode('This may match multiple values — extract all'));
+      multipleRow.appendChild(multipleLabel);
+      panelEl.appendChild(multipleRow);
+    }
+
+    var isDetailField = pickPurpose === 'detail-field';
+    var actions = document.createElement('div');
+    actions.className = 'ws-actions';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'ws-btn-secondary';
+    cancelBtn.textContent = isDetailField ? 'Done' : 'Cancel';
+    var addBtn = document.createElement('button');
+    addBtn.className = 'ws-btn-primary';
+    addBtn.textContent = isDetailField ? 'Add Field' : 'Add Column';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(addBtn);
+    panelEl.appendChild(actions);
+
+    cancelBtn.addEventListener('click', exitPickMode);
+    addBtn.addEventListener('click', function () {
+      var name = nameInput.value.trim() || suggestColumnName(info.attribute, existingNames);
+      var column = {
+        id: WSStorage.makeColumnId(),
+        name: name, // deliberately independent of the extraction type
+        relativeSelector: effectiveSelector,
+        attribute: attrSelect.value
+      };
+      // V1 SIMPLIFIED SESSION WORKFLOW: persist the exact value the user
+      // just saw on this ONE clicked element (the same computation
+      // updateExample() already does for its own transient in-page
+      // "Example:" text) so the popup's setup-tab preview table can show
+      // it later without ever re-touching the page — this is deliberately
+      // NOT re-derived from a live query at popup-render time, so it
+      // always reflects literally the example the user picked, not
+      // whatever the page currently contains. Purely additive/optional —
+      // every existing column-consuming code path (extraction, export,
+      // Saved Scrapers, Templates) already ignores unknown fields.
+      var sampleVal = WSSelector.extractValue(pickedEl, attrSelect.value, null, attrNameInput.value.trim());
+      if (sampleVal) column.sampleValue = sampleVal.slice(0, 200);
+      // attributeName is ONLY ever set for attribute==='attr' columns —
+      // every other existing/new column shape is completely unaffected
+      // (spec #13: new metadata must use backward-compatible defaults;
+      // extractValue's attributeName param is simply undefined/ignored
+      // for every other attribute value, exactly like today).
+      if (attrSelect.value === 'attr') column.attributeName = attrNameInput.value.trim();
+
+      if (isDetailField) {
+        column.multiple = (multipleCheckbox && multipleCheckbox.checked) ? 'all' : 'first';
+        var stagingKey = 'ws_detail_field_picks::' + (pickTargetHostname || hostname());
+        chrome.storage.session.get([stagingKey], function (result) {
+          var staged = ((result && result[stagingKey]) || []).concat([column]);
+          var data = {};
+          data[stagingKey] = staged;
+          chrome.storage.session.set(data, function () {
+            // Stay in pick mode for the next field (spec's own numbered
+            // workflow: pick Description, then Brand, then SKU, all in
+            // one Element Picker activation) — Done/Esc is the only way
+            // to actually exit.
+            enterPickMode('detail-field', { targetHostname: pickTargetHostname });
+          });
+        });
+        return;
+      }
+
+      var newState = {
+        containerSelector: state.containerSelector || info.containerSelector,
+        columns: state.columns.concat([column])
+      };
+      WSStorage.setState(hostname(), newState).then(exitPickMode);
+    });
+
+    setTimeout(function () {
+      nameInput.focus();
+      nameInput.select();
+    }, 0);
+  }
+
+  // REAL REGRESSION FIX: legacy-template migration for a persisted,
+  // over-specific containerSelector (a real Etsy case: an old saved
+  // Title+Price template whose containerSelector baked in per-item
+  // wt-order-*-N reorder classes, collapsing coverage to ~2 cards, even
+  // after content/selector.js's own repeated-container discovery was
+  // fixed — the FIX only applies going forward, to a freshly-clicked
+  // selector; it never revisits a selector that's already sitting in
+  // storage). Runs at the START of every RUN_EXTRACTION (both classic
+  // Preview/Extract and BAŞLA's live session, and it doesn't matter
+  // whether the persisted state came from ordinary column-picking or
+  // from loading a Saved Scraper template — both funnel through
+  // WSStorage.getState/RUN_EXTRACTION the same way) — never a separate,
+  // one-off codepath, so it's not something the user could accidentally
+  // skip.
+  //
+  // Generic, not Etsy-specific: validates the STORED selector by
+  // actually querying it against the live page; only treats it as stale
+  // when it matches an implausibly small number of elements (<=2). To
+  // migrate, it finds a genuine live anchor — one of the stored columns'
+  // own relativeSelector, resolved inside whichever single stale-
+  // container instance still exists — and reruns the EXACT SAME
+  // repeated-container discovery logic a fresh manual click already
+  // uses (WSSelector.findRepeatingContainer + buildContainerSelector),
+  // so there is no second, parallel selector-generation algorithm to
+  // keep in sync. Only replaces the stored selector when the migrated
+  // one is a genuine, strictly better match — never on a tie, never
+  // downgrading a page that legitimately only has 1-2 real records.
+  var STALE_CONTAINER_MATCH_CEILING = 2;
+
+  function migrateContainerSelectorIfStale(state) {
+    var diag = {
+      storedContainerSelector: state.containerSelector || null,
+      matchCountBefore: null,
+      migratedContainerSelector: null,
+      matchCountAfter: null,
+      templateMigrationPerformed: false
+    };
+    if (!state.containerSelector || !Array.isArray(state.columns) || !state.columns.length) return diag;
+
+    var matchCountBefore;
+    try {
+      matchCountBefore = document.querySelectorAll(state.containerSelector).length;
+    } catch (e) {
+      matchCountBefore = 0;
+    }
+    diag.matchCountBefore = matchCountBefore;
+    // 0 matches means the stored selector is broken in a different way
+    // (the page changed shape entirely) — there's no live anchor to
+    // re-derive from, so this migration path (which only ever
+    // REGENERALIZES an over-specific selector) correctly leaves it
+    // alone rather than guessing.
+    if (matchCountBefore < 1 || matchCountBefore > STALE_CONTAINER_MATCH_CEILING) return diag;
+
+    var containers = document.querySelectorAll(state.containerSelector);
+    var anchorEl = null;
+    for (var i = 0; i < containers.length && !anchorEl; i++) {
+      for (var c = 0; c < state.columns.length && !anchorEl; c++) {
+        var col = state.columns[c];
+        if (!col.relativeSelector || col.relativeSelector === ':scope') continue;
+        var fieldEl = WSSelector.queryFromScope(containers[i], col.relativeSelector);
+        if (fieldEl) anchorEl = fieldEl;
+      }
+    }
+    if (!anchorEl) return diag; // no resolvable field inside the stale container — can't safely re-anchor
+
+    var detected = WSSelector.findRepeatingContainer(anchorEl);
+    if (!detected.container) return diag;
+    var migrated = WSSelector.buildContainerSelector(detected.container, undefined, detected.siblings);
+    var matchCountAfter = WSSelector.countMatches(migrated);
+    diag.migratedContainerSelector = migrated;
+    diag.matchCountAfter = matchCountAfter;
+
+    if (migrated && migrated !== state.containerSelector && matchCountAfter > matchCountBefore) {
+      state.containerSelector = migrated;
+      diag.templateMigrationPerformed = true;
+    }
+    return diag;
+  }
+
+  chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (!message || !message.type) return;
+
+    if (message.type === 'PING') {
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message.type === 'START_PICK') {
+      enterPickMode(message.purpose, { targetHostname: message.targetHostname });
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message.type === 'RUN_EXTRACTION') {
+      WSStorage.getState(hostname()).then(function (state) {
+        var migration = migrateContainerSelectorIfStale(state); // mutates state.containerSelector in place when it migrates
+        var persisted = migration.templateMigrationPerformed
+          ? WSStorage.setState(hostname(), state) // step 5: save the migrated template back automatically
+          : Promise.resolve();
+        persisted.then(function () {
+          var result = WSScraper.runExtraction(state);
+          sendResponse({ ok: true, rows: result.rows, totalCount: result.totalCount, containerMigration: migration });
+        });
+      });
+      return true; // keep the message channel open for the async response
+    }
+
+    // V1.18: runs Deep Scraping's Detail Page Fields against THIS page,
+    // treated as a single record (no repeating container) — used both by
+    // background.js's real deep-scrape worker (one tab per detail URL)
+    // and by the popup's "Test Detail Fields" sample preview.
+    if (message.type === 'RUN_DETAIL_EXTRACTION') {
+      try {
+        var row = WSScraper.runDetailExtraction(message.fields || []);
+        sendResponse({ ok: true, row: row });
+      } catch (e) {
+        sendResponse({ ok: false, error: String((e && e.message) || e) });
+      }
+      return true;
+    }
+  });
+})();

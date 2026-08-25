@@ -1,0 +1,1521 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 400px;
+  margin: 0;
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #111827;
+  background: #ffffff;
+}
+
+.ws-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.ws-logo {
+  font-size: 18px;
+}
+
+.ws-header h1 {
+  font-size: 15px;
+  margin: 0;
+  font-weight: 600;
+}
+
+#app {
+  padding: 14px 16px 16px;
+}
+
+/* ---- Tab Navigation (V1.13) ---- */
+
+.ws-tab-nav {
+  display: flex;
+  gap: 2px;
+  padding: 0 10px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.ws-tab-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 10px 4px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.ws-tab-btn:hover {
+  color: #374151;
+}
+
+.ws-tab-btn.ws-tab-active {
+  color: #4338ca;
+  border-bottom-color: #4338ca;
+}
+
+/* V1 UX WORKFLOW SIMPLIFICATION — Monitor/Research are reached from
+   Results ("Monitor Changes" / "Create Research Package"), not the
+   primary top nav. The button stays in the DOM (data-tab, click
+   listener, switchTab() routing all untouched) so nothing that reaches
+   these tabs programmatically breaks — it's simply not shown in the bar. */
+.ws-tab-btn-secondary {
+  display: none;
+}
+
+.ws-tab-panel[hidden] {
+  display: none;
+}
+
+/* Status feedback (spec: success/warning/error/running, text always
+   present — color is a secondary cue, never the only signal) sits
+   between the tab nav and the active panel, visible regardless of which
+   tab is active. */
+#status-msg {
+  margin: 8px 16px 0;
+}
+
+.ws-status.ws-status-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.ws-status.ws-status-warning {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.ws-status.ws-status-running {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+/* ---- Toolbar group labels (Results tab: Data / Export / Assets /
+   Change Tracking) — a small heading above a ws-toolbar-row so related
+   actions read as one group instead of one long undifferentiated
+   button row. ---- */
+.ws-toolbar-group-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9ca3af;
+  margin: 10px 0 4px;
+}
+
+.ws-toolbar-group-label:first-of-type {
+  margin-top: 6px;
+}
+
+/* ---- Collapsible advanced settings (spec #14) — plain <details>, kept
+   deliberately minimal so it never fights the existing ws-panel-inline
+   spacing it's nested inside. ---- */
+details.ws-advanced {
+  margin: 6px 0;
+}
+
+details.ws-advanced summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6b7280;
+  padding: 2px 0;
+}
+
+details.ws-advanced summary:hover {
+  color: #374151;
+}
+
+details.ws-advanced[open] summary {
+  margin-bottom: 4px;
+}
+
+.ws-notice {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.ws-section {
+  margin-bottom: 12px;
+}
+
+.ws-section-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ws-row-count {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #9ca3af;
+}
+
+.ws-columns {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-column-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.ws-column-name {
+  flex: 1;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.ws-column-name:hover,
+.ws-column-name:focus {
+  border-color: #d1d5db;
+  background: #fff;
+  outline: none;
+}
+
+.ws-column-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #4338ca;
+  background: #eef2ff;
+  border-radius: 5px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.ws-column-delete {
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 15px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.ws-column-delete:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.ws-column-reorder {
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 3px 3px;
+  border-radius: 4px;
+}
+
+.ws-column-reorder:hover:not(:disabled) {
+  color: #374151;
+  background: #e5e7eb;
+}
+
+.ws-column-reorder:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.ws-reorder-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Saved Scrapers ---- */
+
+.ws-scrapers {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-scraper-row {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.ws-scraper-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.ws-scraper-name {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-scraper-host {
+  font-size: 10.5px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.ws-scraper-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.ws-scraper-actions button {
+  flex: 1;
+  border: none;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 4px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.ws-scraper-actions button:hover {
+  background: #e0e7ff;
+}
+
+.ws-scraper-actions button.ws-scraper-danger {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+/* V1.22 Templates — mirrors .ws-scrapers/.ws-scraper-row exactly */
+.ws-templates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ws-template-row {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.ws-template-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.ws-template-icon {
+  font-size: 15px;
+}
+
+.ws-template-name {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-template-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.ws-template-desc {
+  font-size: 11px;
+  color: #6b7280;
+  margin: 0 0 5px;
+}
+
+.ws-template-actions {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.ws-template-actions button {
+  border: none;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.ws-template-actions button:hover {
+  background: #e0e7ff;
+}
+
+.ws-template-actions button.ws-scraper-danger {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.ws-scraper-actions button.ws-scraper-danger:hover {
+  background: #fee2e2;
+}
+
+.ws-empty {
+  color: #9ca3af;
+  font-size: 12.5px;
+  margin: 4px 0 10px;
+}
+
+.ws-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ws-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ws-btn-block {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.ws-btn-primary {
+  background: #4f46e5;
+  color: #fff;
+}
+
+.ws-btn-primary:hover:not(:disabled) {
+  background: #4338ca;
+}
+
+.ws-actions-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ws-btn-secondary {
+  flex: 1;
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.ws-btn-secondary:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.ws-btn-danger {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.ws-btn-danger:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.ws-status {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #374151;
+  margin: 0 0 10px;
+}
+
+.ws-status.ws-status-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.ws-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+#preview-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+#preview-table th,
+#preview-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#preview-table th {
+  background: #f9fafb;
+  position: sticky;
+  top: 0;
+  font-weight: 700;
+  color: #374151;
+}
+
+#preview-table td.ws-cell-missing {
+  color: #c1c5cc;
+}
+
+#preview-table tr.ws-row-anomaly td {
+  background: #fffbeb;
+}
+
+#preview-table td.ws-anomaly-flag {
+  width: 18px;
+  text-align: center;
+  cursor: default;
+}
+
+.ws-note {
+  font-size: 11.5px;
+  color: #9ca3af;
+  margin: 6px 2px 0;
+}
+
+/* ---- Results toolbar ---- */
+
+.ws-toolbar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ws-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ws-chip-btn {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.ws-chip-btn:hover {
+  background: #f3f4f6;
+}
+
+.ws-chip-btn.ws-chip-active {
+  background: #eef2ff;
+  border-color: #4f46e5;
+  color: #4338ca;
+}
+
+.ws-chip-btn-warn {
+  border-color: #fca5a5;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.ws-chip-btn-warn:hover {
+  background: #fee2e2;
+}
+
+.ws-panel-inline {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.ws-panel-inline label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6b7280;
+  margin: 6px 0 3px;
+}
+
+.ws-panel-inline label:first-child {
+  margin-top: 0;
+}
+
+.ws-panel-inline select,
+.ws-panel-inline input[type="text"],
+.ws-panel-inline input[type="email"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.ws-radio-row {
+  display: flex;
+  gap: 14px;
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+
+.ws-radio-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #374151;
+  margin: 0;
+}
+
+.ws-panel-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ws-panel-actions .ws-btn {
+  flex: 1;
+}
+
+.ws-export-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.ws-export-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.ws-export-row .ws-btn {
+  flex: 1;
+  padding: 7px 6px;
+}
+
+/* ---- V1.24 Export Options / Copy format split button ---- */
+
+.ws-copy-split {
+  flex: 1;
+  display: flex;
+  gap: 0;
+}
+
+.ws-copy-split .ws-btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.ws-copy-split select {
+  width: 56px;
+  flex: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+  font-size: 11px;
+  padding: 0 2px;
+}
+
+/* ---- Run Mode / Run Progress (V1.3) ---- */
+
+.ws-radio-col {
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.ws-radio-col label {
+  font-weight: 500;
+}
+
+.ws-status-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.ws-status-badge.ws-status-running,
+.ws-status-badge.ws-status-waiting,
+.ws-status-badge.ws-status-preparing {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.ws-status-badge.ws-status-completed {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.ws-status-badge.ws-status-stopped {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+/* V1.20: visually distinct from Stopped — Pause is a temporary halt,
+   not a completion-adjacent state. */
+.ws-status-badge.ws-status-paused {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.ws-status-badge.ws-status-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+/* ---- Monitoring Dashboard (V1.11) ---- */
+
+.ws-status-badge.ws-status-changed {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.ws-status-badge.ws-status-never {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.ws-monitor-summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+}
+
+.ws-monitor-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ws-monitor-filter-btn.ws-chip-active {
+  background: #eef2ff;
+  border-color: #4f46e5;
+  color: #4338ca;
+}
+
+/* ---- Auto Detect (V1.4) ---- */
+
+.ws-status-badge.ws-conf-high {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.ws-status-badge.ws-conf-medium {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.ws-status-badge.ws-conf-low {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.ws-ad-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.ws-ad-field-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.ws-ad-field-row input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.ws-ad-field-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.ws-ad-field-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ws-ad-field-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ws-ad-field-sample {
+  font-size: 11.5px;
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.ws-ad-field-coverage {
+  font-size: 10px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+/* ---- V1.17: field-type / selector-quality tags (informational only) ---- */
+
+.ws-ad-field-type {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #4338ca;
+  background: #eef2ff;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.ws-ad-field-quality-warn {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+/* ---- Bulk Download (V1.5) ---- */
+
+.ws-checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 2px 0 8px;
+}
+
+.ws-checkbox-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #374151;
+  margin: 0;
+}
+
+/* ---- Snapshots / Change Detection (V1.6) ---- */
+
+.ws-scraper-snapshot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+.ws-scraper-snapshot-note {
+  font-size: 10.5px;
+  color: #9ca3af;
+}
+
+.ws-scraper-snapshot-manage {
+  border: none;
+  background: transparent;
+  color: #4338ca;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.ws-snapshot-manage-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ws-snapshot-manage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 11px;
+  color: #374151;
+}
+
+.ws-snapshot-manage-row button {
+  border: none;
+  background: transparent;
+  color: #dc2626;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+.ws-change-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ws-change-row {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.ws-change-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ws-change-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-change-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ws-change-badge-new { background: #ecfdf5; color: #047857; }
+.ws-change-badge-removed { background: #fef2f2; color: #b91c1c; }
+.ws-change-badge-changed { background: #eef2ff; color: #4338ca; }
+.ws-change-badge-unchanged { background: #f3f4f6; color: #6b7280; }
+
+.ws-price-chip {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ws-price-chip-down { background: #ecfdf5; color: #047857; }
+.ws-price-chip-up { background: #fef2f2; color: #b91c1c; }
+
+.ws-change-preview {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-change-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ws-change-detail-field {
+  display: flex;
+  gap: 6px;
+  font-size: 11.5px;
+  align-items: baseline;
+}
+
+.ws-change-detail-field-name {
+  font-weight: 600;
+  color: #374151;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.ws-change-detail-field-value {
+  color: #6b7280;
+  overflow-wrap: anywhere;
+}
+
+.ws-change-detail-field-value.ws-change-detail-diff {
+  color: #111827;
+}
+
+.ws-change-detail-old {
+  text-decoration: line-through;
+  color: #b91c1c;
+}
+
+.ws-change-detail-new {
+  color: #047857;
+  font-weight: 600;
+}
+
+/* ---- Transform / Data Cleaning (V1.7) ---- */
+
+.ws-transform-history {
+  list-style: none;
+  counter-reset: tf-step;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ws-transform-history li {
+  counter-increment: tf-step;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  color: #374151;
+}
+
+.ws-transform-history li::before {
+  content: counter(tf-step) '.';
+  font-weight: 700;
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+
+.ws-transform-history-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-transform-history li button {
+  border: none;
+  background: transparent;
+  color: #dc2626;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+/* V1.23 spec #2: enable/disable + reorder controls for individual transform steps */
+
+.ws-transform-history li input[type="checkbox"] {
+  flex-shrink: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.ws-transform-history-disabled {
+  opacity: 0.55;
+}
+
+.ws-transform-history-disabled .ws-transform-history-label {
+  text-decoration: line-through;
+}
+
+.ws-transform-reorder {
+  color: #6b7280 !important;
+  font-size: 10px !important;
+  line-height: 1;
+}
+
+.ws-transform-reorder:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.ws-tf-option-group {
+  margin-top: 2px;
+}
+
+.ws-tf-error {
+  color: #b91c1c !important;
+}
+
+/* ---- Monitoring (V1.8) ---- */
+
+.ws-monitor-status-line {
+  font-size: 10.5px;
+  color: #6b7280;
+  margin: 4px 0 6px;
+  white-space: pre-line;
+}
+
+.ws-monitor-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ws-monitor-controls select {
+  flex: 1;
+  min-width: 90px;
+  padding: 4px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-family: inherit;
+}
+
+/* ---- Notifications (V1.9) ---- */
+
+.ws-monitor-notify-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ws-monitor-notify-label input[type="checkbox"] {
+  margin: 0;
+}
+
+/* ---- Monitoring History (V1.10) ---- */
+
+.ws-monitor-history-panel {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+.ws-monitor-history-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.ws-monitor-history-row {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 5px 7px;
+}
+
+.ws-monitor-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: #374151;
+}
+
+.ws-monitor-history-detail {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+/* ---- V1 WORKFLOW REORG: AUTO/MANUAL mode switch + Results "Next Actions" ---- */
+
+.ws-mode-switch {
+  display: flex;
+  gap: 0;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 3px;
+  margin: 8px 0;
+}
+
+.ws-mode-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 8px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ws-mode-btn:hover {
+  color: #374151;
+}
+
+.ws-mode-btn[aria-pressed="true"] {
+  background: #fff;
+  color: #4338ca;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.ws-next-actions {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.ws-next-actions-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.ws-next-actions .ws-toolbar-row {
+  flex-wrap: wrap;
+}
+
+.ws-scraper-row-highlight {
+  outline: 2px solid #4f46e5;
+  outline-offset: -2px;
+  border-radius: 6px;
+  transition: outline-color 1.6s ease;
+}
+
+/* ---- V1.13.1: Guided Workflow / UX Simplification ---- */
+
+.ws-workflow {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.ws-workflow-steps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #9ca3af;
+  margin-bottom: 6px;
+}
+
+.ws-workflow-step-arrow {
+  color: #d1d5db;
+}
+
+.ws-workflow-step.ws-workflow-step-active {
+  color: #4338ca;
+}
+
+.ws-workflow-step.ws-workflow-step-done {
+  color: #6b7280;
+}
+
+.ws-workflow-status {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  color: #374151;
+  font-weight: 500;
+  white-space: pre-line;
+}
+
+#scrape-view-results-btn {
+  margin-bottom: 0;
+}
+
+.ws-load-status {
+  margin: -4px 0 8px;
+  font-size: 11.5px;
+  font-style: italic;
+  color: #9ca3af;
+}
+
+#results-empty-wrap,
+#research-empty-wrap {
+  margin-bottom: 10px;
+}
+
+/* Monitoring card controls (V1.8) were plain unstyled <button> elements
+   until now — this gives every card the same neutral look, with Enable/
+   Run Now standing out as the card's one obvious primary action (spec
+   #7), without touching the existing flex layout (.ws-monitor-controls
+   already wraps/sizes these). */
+.ws-monitor-controls button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ws-monitor-controls button:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.ws-monitor-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ws-monitor-controls button.ws-monitor-btn-primary {
+  background: #4f46e5;
+  border-color: #4f46e5;
+  color: #fff;
+}
+
+.ws-monitor-controls button.ws-monitor-btn-primary:hover:not(:disabled) {
+  background: #4338ca;
+}
+
+.ws-monitor-never-run-note {
+  font-size: 11px;
+  color: #6b7280;
+  margin: -4px 0 6px;
+}
+
+/* ---- V1.14: Settings/Upgrade Modal scaffolding, kept in V1.15 ---- */
+/* ---- V1.15: usage-based trial badge, replaces the V1.14 Free/Pro
+   feature-gating model entirely (no more .ws-pro-tag / .ws-limit-note —
+   there is no per-feature gating left to visually mark). ---- */
+
+.ws-trial-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #4338ca;
+  background: #eef2ff;
+  border-radius: 999px;
+  padding: 2px 7px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+.ws-trial-badge-empty {
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.ws-header {
+  position: relative;
+}
+
+.ws-icon-btn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.ws-icon-btn:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+#settings-panel {
+  padding-top: 4px;
+}
+
+.ws-placeholder-link {
+  color: #9ca3af;
+  cursor: default;
+  text-decoration: none;
+  font-size: 11px;
+}
+
+.ws-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 16px;
+}
+
+/* V1 FINAL Bug #1 (part 3) — REAL CHROME BUG, root cause of "clicking
+   Maybe Later does nothing / the modal remains open": an author-level
+   class rule's `display` value always wins over the browser's own
+   `[hidden] { display: none; }` user-agent default (author styles beat
+   UA styles at equal specificity, regardless of source order) — so
+   setting el.hidden = true on the trial modal correctly updated the
+   `hidden` ATTRIBUTE but never actually hid it, because
+   .ws-modal-overlay's own unconditional `display: flex` above kept
+   overriding it. This one companion rule (the exact same
+   `.selector[hidden] { display: none; }` pattern .ws-tab-panel[hidden]
+   already established elsewhere in this file) restores the native
+   hidden-attribute behavior. */
+.ws-modal-overlay[hidden] {
+  display: none;
+}
+
+.ws-modal {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px;
+  width: 100%;
+  max-width: 320px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.ws-modal h3 {
+  font-size: 14px;
+  margin: 8px 0 6px;
+}
+
+.ws-modal p {
+  font-size: 12.5px;
+  color: #374151;
+  line-height: 1.5;
+  margin: 0 0 4px;
+}
+
+.ws-modal .ws-panel-actions {
+  margin-top: 12px;
+}
+
+.ws-first-run-help {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: #6b7280;
+}
+
+.ws-first-run-help li {
+  margin-bottom: 2px;
+}
+
+/* ---- V1.16: Commercial Release Architecture — license verification/
+   recovery UI, purely additive to V1.15's trial badge/modal. ---- */
+
+.ws-license-verification-note {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.ws-license-verification-note-warn {
+  color: #b45309;
+}
