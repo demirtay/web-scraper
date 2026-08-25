@@ -1,2 +1,5 @@
 # Build output (scripts/build-release.js) — reproducible from source, never committed.
 dist/
+
+# Personal/internal dev notes — not part of the extension, never published.
+Chrome Extension projeler.txt
