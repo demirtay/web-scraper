@@ -1445,6 +1445,14 @@
   <script src="../utils/templates.js"></script>
   <script src="../utils/downloads.js"></script>
   <script src="../utils/transforms.js"></script>
+  <!-- NEW FEATURE — DATA CLEANING ENGINE: optional per-column type
+       (RAW/TEXT/PRICE/NUMBER/URL), applied AFTER extraction and BEFORE
+       the existing WSTransforms pipeline above. A separate, much
+       simpler layer from the advanced multi-step Transform pipeline —
+       see utils/cleaners.js's own header comment. Must load after
+       results.js (numeric parsing reuse) and transforms.js (text/URL
+       primitive reuse), before popup.js. -->
+  <script src="../utils/cleaners.js"></script>
   <script src="../utils/changes.js"></script>
   <script src="../utils/snapshots.js"></script>
   <script src="../utils/research.js"></script>

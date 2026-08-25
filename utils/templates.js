@@ -56,6 +56,17 @@
   var SCHEMA_VERSION = 1;
   var MAX_STRING_LEN = 2000; // generous but bounded — defends against a malicious/corrupt import stuffing huge strings, never a real limitation for genuine template data
   var VALID_ATTRIBUTES = ['text', 'html', 'href', 'src', 'alt', 'attr', 'structured', 'position'];
+  // NEW FEATURE — DATA CLEANING ENGINE: the optional per-column cleaner
+  // type (see utils/cleaners.js). Mirrors VALID_ATTRIBUTES' own pattern
+  // exactly — an unrecognized/missing value normalizes to 'raw', never
+  // dropped or left as untrusted input, so an OLDER saved template (with
+  // no cleanerType field at all) behaves identically to one explicitly
+  // set to 'raw' (mission spec #20: "Existing saved templates without
+  // cleanerType: must default to RAW").
+  var VALID_CLEANER_TYPES = ['raw', 'text', 'price', 'number', 'url'];
+  function normalizeCleanerType(raw) {
+    return VALID_CLEANER_TYPES.indexOf(raw) !== -1 ? raw : 'raw';
+  }
   var VALID_CATEGORIES = ['ecommerce', 'search', 'article', 'directory', 'realestate', 'jobs', 'table', 'list', 'custom'];
 
   function makeTemplateId() {
@@ -138,18 +149,20 @@
         id: root.WSStorage ? root.WSStorage.makeColumnId() : ('col_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)),
         name: name, relativeSelector: null, attribute: 'structured',
         structuredPath: structuredPath,
-        structuredKind: ['image', 'url', 'text'].indexOf(raw.structuredKind) !== -1 ? raw.structuredKind : 'text'
+        structuredKind: ['image', 'url', 'text'].indexOf(raw.structuredKind) !== -1 ? raw.structuredKind : 'text',
+        cleanerType: normalizeCleanerType(raw.cleanerType)
       };
     }
     if (attribute === 'position') {
-      return { id: root.WSStorage ? root.WSStorage.makeColumnId() : ('col_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)), name: name, relativeSelector: ':scope', attribute: 'position' };
+      return { id: root.WSStorage ? root.WSStorage.makeColumnId() : ('col_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)), name: name, relativeSelector: ':scope', attribute: 'position', cleanerType: normalizeCleanerType(raw.cleanerType) };
     }
     var relativeSelector = raw.relativeSelector === ':scope' ? ':scope' : safeStringOrNull(raw.relativeSelector);
     if (!relativeSelector) return null; // a DOM column with no selector at all can never extract anything — drop it
     return {
       id: root.WSStorage ? root.WSStorage.makeColumnId() : ('col_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)),
       name: name, relativeSelector: relativeSelector, attribute: attribute,
-      attributeName: attribute === 'attr' ? safeStringOrNull(raw.attributeName) : null
+      attributeName: attribute === 'attr' ? safeStringOrNull(raw.attributeName) : null,
+      cleanerType: normalizeCleanerType(raw.cleanerType)
     };
   }
 

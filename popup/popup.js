@@ -735,6 +735,19 @@
     return res;
   }
 
+  // NEW FEATURE — DATA CLEANING ENGINE: the 5 selectable column types
+  // (mission spec #2), in the exact order the mission's own example UI
+  // mockup lists them. 'raw' is always first/default — matches every
+  // other "off by default" control in this popup (Auto Next/Auto Scroll
+  // toggles, etc.).
+  var CLEANER_TYPE_OPTIONS = [
+    { value: 'raw', label: 'Raw' },
+    { value: 'text', label: 'Text' },
+    { value: 'price', label: 'Price' },
+    { value: 'number', label: 'Number' },
+    { value: 'url', label: 'URL' }
+  ];
+
   function attrLabel(attr) {
     if (attr === 'href') return 'Link';
     if (attr === 'src') return 'Image';
@@ -902,6 +915,31 @@
       tag.className = 'ws-column-tag';
       tag.textContent = attrLabel(col.attribute);
 
+      // NEW FEATURE — DATA CLEANING ENGINE: optional per-column cleaner
+      // type, OFF (RAW) by default. Purely additive to the existing
+      // attribute tag above — selectors/extraction are never touched by
+      // this control, only col.cleanerType (mission spec #2: "reuse the
+      // existing attribute/type area cleanly... do not create
+      // unnecessary new screens" — this IS that reuse: one more small
+      // control on the same existing column row).
+      var cleanSelect = document.createElement('select');
+      cleanSelect.className = 'ws-column-clean-select';
+      cleanSelect.title = 'How should this column’s value be cleaned?';
+      CLEANER_TYPE_OPTIONS.forEach(function (opt) {
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        cleanSelect.appendChild(o);
+      });
+      cleanSelect.value = col.cleanerType || 'raw';
+      cleanSelect.addEventListener('change', function () {
+        col.cleanerType = cleanSelect.value;
+        persistState();
+        invalidateTransformCache();
+        renderSetupPreviewTable();
+        renderResults();
+      });
+
       var delBtn = document.createElement('button');
       delBtn.className = 'ws-column-delete';
       delBtn.textContent = '×';
@@ -917,6 +955,7 @@
       li.appendChild(reorderGroup);
       li.appendChild(nameInput);
       li.appendChild(tag);
+      li.appendChild(cleanSelect);
       li.appendChild(delBtn);
       els.columnsList.appendChild(li);
     });
@@ -950,8 +989,22 @@
     var bodyRow = document.createElement('tr');
     state.columns.forEach(function (c) {
       var td = document.createElement('td');
-      td.textContent = c.sampleValue || '—';
-      td.title = c.sampleValue || '';
+      // NEW FEATURE — DATA CLEANING ENGINE: this one-row setup preview
+      // reflects the selected cleaner type too (mission spec #19:
+      // "Preview should reflect the selected cleaning type... changing
+      // type should update preview without requiring the user to
+      // redefine the selector") — same typeof guard as
+      // applyColumnCleaners, same "never fabricate" contract; an absent
+      // sampleValue still shows the placeholder dash, never a cleaned
+      // guess derived from nothing.
+      var type = c.cleanerType || 'raw';
+      var display = c.sampleValue;
+      if (display && type !== 'raw' && typeof WSCleaners !== 'undefined') {
+        try { display = WSCleaners.applyCleaner(type, display, { baseUrl: pageUrl }); }
+        catch (e) { /* fall back to the raw sample value */ }
+      }
+      td.textContent = display || '—';
+      td.title = display || '';
       bodyRow.appendChild(td);
     });
     table.appendChild(headRow);
@@ -4939,6 +4992,40 @@
    * so re-rendering the results table on every keystroke elsewhere in the
    * UI doesn't re-run the whole pipeline (spec #34). Falls back to the
    * untransformed dataset — never a blank UI — if a transform errors. */
+  // NEW FEATURE — DATA CLEANING ENGINE: applies each column's own
+  // cleanerType (mission spec #18: "extract raw value -> apply selected
+  // column cleaner -> preview cleaned value -> store cleaned export
+  // value") to a FRESH cloned array — rawRows itself is never mutated,
+  // exactly like WSTransforms' own non-destructive contract, so the true
+  // original extracted value always survives underneath (spec #3). Runs
+  // BEFORE the advanced WSTransforms pipeline, so a user's own Transform
+  // steps see already-cleaned values, and BEFORE dedupe/session identity
+  // (which live entirely in content/livewatch.js et al., operating on
+  // session.rows directly — this function is never in that path at all,
+  // so cleaning can never destructively affect dedupe, per spec #24).
+  //
+  // Fast path: when no column has an active (non-'raw') cleanerType,
+  // returns `rows` completely untouched — spec #1's "if cleaning is
+  // disabled... existing behavior must remain unchanged" holds by
+  // construction, not merely as an emergent property of every cleaner
+  // being a no-op.
+  function applyColumnCleaners(rows, columns, context) {
+    // typeof-guarded (not a bare `WSCleaners` reference) so this degrades
+    // safely to "no cleaning" — identical to RAW — rather than throwing,
+    // in any context that hasn't loaded utils/cleaners.js.
+    if (typeof WSCleaners === 'undefined' || !columns.some(function (c) { return c.cleanerType && c.cleanerType !== 'raw'; })) return rows;
+    return rows.map(function (row) {
+      var clone = Object.assign({}, row);
+      columns.forEach(function (c) {
+        var type = c.cleanerType || 'raw';
+        if (type === 'raw') return;
+        try { clone[c.id] = WSCleaners.applyCleaner(type, row[c.id], context); }
+        catch (e) { /* a single malformed value must never break the row (spec #25) — keep it as-extracted */ }
+      });
+      return clone;
+    });
+  }
+
   function computeTransformedResult() {
     if (transformResultCache) return transformResultCache;
     // V1.18: merged Deep Scraping columns (deepScrapeColumns — {id,name}
@@ -4950,12 +5037,13 @@
     // Save Scraper/Preview/Auto Scroll/Multi-page all still rely on
     // (spec #14: "never replace original columns accidentally").
     var baseColumns = deepScrapeColumns.length ? state.columns.concat(deepScrapeColumns) : state.columns;
+    var cleanedRows = applyColumnCleaners(rawRows, baseColumns, { baseUrl: pageUrl });
     var result;
     try {
-      result = WSTransforms.applyTransforms(rawRows, baseColumns, activeTransforms, { baseUrl: pageUrl });
+      result = WSTransforms.applyTransforms(cleanedRows, baseColumns, activeTransforms, { baseUrl: pageUrl });
     } catch (e) {
       setStatus('Transform error — showing untransformed data: ' + friendlyErrorMessage(e, 'an unexpected error.'), true);
-      result = { rows: rawRows, columns: baseColumns };
+      result = { rows: cleanedRows, columns: baseColumns };
     }
     transformResultCache = result;
     return result;

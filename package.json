@@ -9,7 +9,8 @@
     "test:browser": "node e2e/run.js",
     "test:browser:headed": "node e2e/run.js --headed",
     "test:browser:autopaginate": "node e2e/run.js --scenario=autopaginate-real-site --headed",
-    "test:browser:autoscroll": "node e2e/run.js --scenario=autoscroll-real-site --headed"
+    "test:browser:autoscroll": "node e2e/run.js --scenario=autoscroll-real-site --headed",
+    "test:browser:cleaning": "node e2e/run.js --scenario=cleaning-real-site --headed"
   },
   "devDependencies": {
     "playwright": "^1.62.1"
