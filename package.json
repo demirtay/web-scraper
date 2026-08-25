@@ -1,0 +1,17 @@
+{
+  "name": "web-scraper-extension",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Dev tooling for the Web Scraper (ClickScrape) Chrome extension. The extension itself has no build step and no runtime dependencies — this file exists only for the real-browser E2E test harness (e2e/) and its npm scripts.",
+  "scripts": {
+    "release-check": "node scripts/release-check.js",
+    "postinstall": "playwright install chromium",
+    "test:browser": "node e2e/run.js",
+    "test:browser:headed": "node e2e/run.js --headed",
+    "test:browser:autopaginate": "node e2e/run.js --scenario=autopaginate-real-site --headed",
+    "test:browser:autoscroll": "node e2e/run.js --scenario=autoscroll-real-site --headed"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

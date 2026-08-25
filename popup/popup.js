@@ -172,6 +172,15 @@
     bitirBtn: document.getElementById('bitir-btn'),
     exportGate: document.getElementById('export-gate'),
 
+    // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next)
+    autoNextToggle: document.getElementById('auto-next-toggle'),
+    autoPaginateStatus: document.getElementById('auto-paginate-status'),
+    durdurBtn: document.getElementById('durdur-btn'),
+
+    // NEW FEATURE — INFINITE SCROLL (Auto Scroll)
+    autoScrollToggle: document.getElementById('auto-scroll-toggle'),
+    autoScrollStatus: document.getElementById('auto-scroll-status'),
+
     toggleFilterBtn: document.getElementById('toggle-filter-btn'),
     toggleSortBtn: document.getElementById('toggle-sort-btn'),
     toggleDedupeBtn: document.getElementById('toggle-dedupe-btn'),
@@ -491,8 +500,20 @@
     'content/content.js',
     'content/pagination.js',
     'content/autodetect.js',
-    'content/livewatch.js'
+    'content/livewatch.js',
+    'content/nextdetect.js',
+    'content/autoscroll.js',
+    'content/autopaginate.js'
   ];
+  // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next): content/nextdetect.js
+  // + content/autopaginate.js. See background.js's identical addition/
+  // comment for why these are always safe to inject (inert unless a
+  // session has an explicit autoPaginate field) and why this comment
+  // deliberately sits outside the array literal.
+  // NEW FEATURE — INFINITE SCROLL (Auto Scroll): content/autoscroll.js —
+  // same complete-no-op guarantee, gated on an explicit autoScroll
+  // field. See content/autoscroll.js's own header comment for how it
+  // coexists with Auto Next when both are enabled.
 
   var PREVIEW_LIMIT = 30;
   // V1.25 spec #3-4: the Results table has always been windowed at
@@ -2050,6 +2071,23 @@
       await chargeRunCredit('livesession_' + hostname + '_' + Date.now() + '_' + Math.random().toString(36).slice(2));
 
       var dedupeKey = pickDedupeKeyForColumns(state.columns);
+      // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next). Read exactly
+      // once, right here at BAŞLA, and never touched again mid-session —
+      // spec: "Default: OFF... after BAŞLA the scraper automatically
+      // continues" (a toggle change mid-session has no defined meaning,
+      // so it simply isn't read again). Left entirely OFF (the field is
+      // absent) unless the checkbox was checked, so a session created
+      // with the toggle OFF is byte-for-byte the same shape this feature
+      // has always produced — content/autopaginate.js's message handlers
+      // are never even reached for such a session.
+      var autoNextEnabled = !!(els.autoNextToggle && els.autoNextToggle.checked);
+      // NEW FEATURE — INFINITE SCROLL (Auto Scroll). Same read-once,
+      // never-touched-again-mid-session contract as autoNextEnabled
+      // above. Independent of Auto Next — either can be on alone, or
+      // both together (see content/autopaginate.js's own coexistence
+      // handling, which runs Auto Scroll to exhaustion on each page
+      // before looking for Next whenever both are enabled).
+      var autoScrollEnabled = !!(els.autoScrollToggle && els.autoScrollToggle.checked);
       // Stored NORMALIZED (see WSRunState.normalizeHostname) so the
       // session's own record of "which site this is" always matches the
       // key it's actually filed under — a diagnostic reading s.hostname
@@ -2066,7 +2104,17 @@
         // unconditionally writes progress.rowsCollected — this minimal stub
         // is the only WSRunState-shaped field this deliberately-simpler
         // session object needs to stay compatible with that shared function.
-        progress: { rowsCollected: 0 }
+        progress: { rowsCollected: 0 },
+        autoPaginate: autoNextEnabled ? {
+          enabled: true, status: 'running', stopReason: null,
+          pageCount: 1, maxPages: 20,
+          visitedUrls: pageUrl ? [pageUrl] : [], pageSignatures: [], updatedAt: Date.now()
+        } : null,
+        autoScroll: autoScrollEnabled ? {
+          enabled: true, status: 'running', stopReason: null,
+          cycleCount: 0, maxCycles: 30, consecutiveNoNewData: 0, maxNoNewDataAttempts: 3,
+          pageSignatures: [], updatedAt: Date.now()
+        } : null
       };
       // Seed rows/seenKeys via the EXACT SAME dedup function
       // content/livewatch.js's passive watcher will use for every later
@@ -2140,6 +2188,27 @@
         watchStarted = !!(watchRes && watchRes.ok);
       } catch (e) { watchStarted = false; }
 
+      // NEW FEATURE — AUTOMATIC PAGINATION: only sent when the toggle
+      // was ON (session.autoPaginate is null otherwise, and
+      // content/autopaginate.js's message handlers are never invoked
+      // for a session with no autoPaginate field at all). Best-effort,
+      // same non-blocking-warning treatment as START_LIVE_WATCH above —
+      // the session/initial results already succeeded regardless.
+      if (autoNextEnabled) {
+        try { await sendToContent({ type: 'START_AUTO_PAGINATE' }); }
+        catch (e) { console.error('[Web Scraper] START_AUTO_PAGINATE did not confirm — automatic pagination may not be active for this session.'); }
+      }
+      // NEW FEATURE — INFINITE SCROLL: only sent when Auto Scroll is ON
+      // AND Auto Next is OFF. When BOTH are on, content/autopaginate.js's
+      // own loop (already started above) calls
+      // WSAutoScroll.runUntilExhausted() directly itself — sending this
+      // message too would start a SECOND, competing scroll loop on the
+      // same page. Exactly one driver of scrolling, always.
+      if (autoScrollEnabled && !autoNextEnabled) {
+        try { await sendToContent({ type: 'START_AUTO_SCROLL' }); }
+        catch (e) { console.error('[Web Scraper] START_AUTO_SCROLL did not confirm — infinite scroll may not be active for this session.'); }
+      }
+
       attachLiveSessionStorageListener();
       switchTab('results');
       setStatus('');
@@ -2162,10 +2231,54 @@
   async function handleFinishLiveSession() {
     if (!activeLiveSession) return;
     try { await sendToContent({ type: 'STOP_LIVE_WATCH' }); } catch (e) { /* best-effort */ }
+    // NEW FEATURE — AUTOMATIC PAGINATION: BİTİR must stop the auto-next
+    // navigation loop too, not just the passive watcher — a no-op,
+    // harmless message if this session never had autoPaginate on.
+    // session.status is set to 'finished' below regardless, which the
+    // loop's own stillRunning() check would eventually notice on its
+    // own, but this makes the stop immediate rather than waiting out an
+    // in-flight navigation wait.
+    try { await sendToContent({ type: 'STOP_AUTO_PAGINATE' }); } catch (e) { /* best-effort */ }
+    // NEW FEATURE — INFINITE SCROLL: same treatment — BİTİR must stop
+    // Auto Scroll too (spec section 13: "If the user presses Finish...
+    // stop Auto Scroll immediately, stop Auto Next too if both are
+    // running"). Harmless no-op if this session never had autoScroll on.
+    try { await sendToContent({ type: 'STOP_AUTO_SCROLL' }); } catch (e) { /* best-effort */ }
     try { await chrome.scripting.unregisterContentScripts({ ids: ['ws-livewatch-' + hostname] }); } catch (e) { /* ignore — may never have been registered (permission declined, or same-page-only session) */ }
     activeLiveSession.status = 'finished';
     activeLiveSession.updatedAt = Date.now();
     await liveSessionSet(hostname, activeLiveSession);
+    renderLiveSessionUI();
+  }
+
+  /** DURDUR — the ONE shared Stop control for Auto Next and/or Auto
+   * Scroll. A genuinely distinct action from BİTİR (spec: "stops future
+   * automatic navigation/scrolling, keeps all already collected rows,
+   * does NOT delete session") — the session itself stays 'active'
+   * (manual browsing/live-watching keeps working, BİTİR is still
+   * available afterward exactly as if neither feature had ever been
+   * used). Stops WHICHEVER of the two is actually active — either
+   * message is a harmless no-op if that particular sub-feature was
+   * never on for this session. Only ever reachable while at least one
+   * of them exists and is running (see renderLiveSessionUI's
+   * durdurBtn.hidden gating), so the guards below are defensive, not
+   * load-bearing. */
+  async function handleStopAutoPaginate() {
+    if (!activeLiveSession || !(activeLiveSession.autoPaginate || activeLiveSession.autoScroll)) return;
+    try { await sendToContent({ type: 'STOP_AUTO_PAGINATE' }); } catch (e) { /* best-effort */ }
+    try { await sendToContent({ type: 'STOP_AUTO_SCROLL' }); } catch (e) { /* best-effort */ }
+    // The content script's own write(s) (status:'stopped') will arrive
+    // via the existing storage.onChanged listener and re-render — this
+    // local update just makes the button/status feel instant rather
+    // than waiting on that round-trip.
+    if (activeLiveSession.autoPaginate) {
+      activeLiveSession.autoPaginate.status = 'stopped';
+      activeLiveSession.autoPaginate.stopReason = 'user';
+    }
+    if (activeLiveSession.autoScroll) {
+      activeLiveSession.autoScroll.status = 'stopped';
+      activeLiveSession.autoScroll.stopReason = 'user';
+    }
     renderLiveSessionUI();
   }
 
@@ -2179,6 +2292,8 @@
       els.liveSessionStatus.hidden = true;
       if (els.bitirBtn) els.bitirBtn.hidden = true;
       if (els.exportGate) els.exportGate.hidden = false;
+      if (els.autoPaginateStatus) els.autoPaginateStatus.hidden = true;
+      if (els.durdurBtn) els.durdurBtn.hidden = true;
       return;
     }
     els.liveSessionStatus.hidden = false;
@@ -2193,6 +2308,36 @@
       if (els.bitirBtn) els.bitirBtn.hidden = true;
       if (els.exportGate) els.exportGate.hidden = false;
     }
+
+    // NEW FEATURE — AUTOMATIC PAGINATION: its own status line, shown
+    // only for a session that actually has autoPaginate — every other
+    // session (the toggle was OFF, or it's a pre-feature session)
+    // leaves it permanently hidden, identical to before this feature
+    // existed.
+    var ap = activeLiveSession.autoPaginate;
+    var apRunning = !!(ap && (ap.status === 'running' || ap.status === 'navigating'));
+    if (els.autoPaginateStatus) {
+      els.autoPaginateStatus.hidden = !apRunning;
+      if (apRunning) els.autoPaginateStatus.textContent = WSI18n.t('liveSession.scanningPage', { page: ap.pageCount });
+    }
+
+    // NEW FEATURE — INFINITE SCROLL: same contract, its own independent
+    // status line, shown only for a session that actually has
+    // autoScroll — can be true/hidden completely independently of
+    // autoPaginate above (either feature alone, or both together).
+    var as = activeLiveSession.autoScroll;
+    var asRunning = !!(as && as.status === 'running');
+    if (els.autoScrollStatus) {
+      els.autoScrollStatus.hidden = !asRunning;
+      if (asRunning) els.autoScrollStatus.textContent = WSI18n.t('liveSession.scrollingRows', { count: activeLiveSession.rows.length });
+    }
+
+    // DURDUR is the ONE shared Stop control for either/both features —
+    // shown whenever at least one of them is actively running. Only
+    // reachable while the session itself is still 'active' — a finished
+    // session (BİTİR) already hides bitirBtn/shows exportGate above, and
+    // DURDUR would be meaningless once the dataset is frozen.
+    if (els.durdurBtn) els.durdurBtn.hidden = !((apRunning || asRunning) && activeLiveSession.status === 'active');
   }
 
   /** Mirrors attachRunStorageListener's exact existing pattern: a live
@@ -7750,6 +7895,7 @@
     els.resetBtn.addEventListener('click', handleResetColumns);
     if (els.baslaBtn) els.baslaBtn.addEventListener('click', handleStartLiveSession);
     if (els.bitirBtn) els.bitirBtn.addEventListener('click', handleFinishLiveSession);
+    if (els.durdurBtn) els.durdurBtn.addEventListener('click', handleStopAutoPaginate);
 
     els.toggleFilterBtn.addEventListener('click', toggleFilterPanel);
     els.toggleSortBtn.addEventListener('click', toggleSortPanel);

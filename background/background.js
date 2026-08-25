@@ -359,8 +359,32 @@ var CONTENT_FILES = [
   'content/content.js',
   'content/pagination.js',
   'content/autodetect.js',
-  'content/livewatch.js'
+  'content/livewatch.js',
+  'content/nextdetect.js',
+  'content/autoscroll.js',
+  'content/autopaginate.js'
 ];
+// NEW FEATURE — AUTOMATIC PAGINATION (Auto Next, optional, OFF by
+// default), content/nextdetect.js + content/autopaginate.js above:
+// content/nextdetect.js is pure detection logic (no listener of its
+// own); content/autopaginate.js registers its own message listener and
+// resume-on-load bootstrap, exactly like pagination.js/livewatch.js.
+// Neither is invoked unless a session has an explicit autoPaginate field
+// (see popup.js, function handleStartLiveSession) — every existing
+// session/run is completely unaffected by these two files simply being
+// present in the injected set. (Kept OUTSIDE the array literal above,
+// not as an inline comment between entries — scripts/release-check.js's
+// own CONTENT_FILES parser is a plain quote-delimited regex over the
+// array body, which an inline comment containing an apostrophe would
+// otherwise corrupt.)
+//
+// NEW FEATURE — INFINITE SCROLL (Auto Scroll, optional, OFF by
+// default), content/autoscroll.js above: exposes a reusable
+// runUntilExhausted() function, called either by that file's own
+// standalone message listener (Auto Next off) or directly by
+// content/autopaginate.js (both features on — see that file's own
+// coexistence comment). Never invoked unless a session has an explicit
+// autoScroll field — same complete-no-op guarantee as autoPaginate.
 
 function alarmNameFor(scraperId) {
   return 'ws_monitor::' + scraperId;

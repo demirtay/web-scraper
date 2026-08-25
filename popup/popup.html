@@ -89,6 +89,24 @@
           <table id="setup-preview-table"></table>
         </div>
 
+        <!-- NEW FEATURE — AUTOMATIC PAGINATION (Auto Next). OFF by
+             default (spec). Read once, at BAŞLA click time, by
+             popup.js's handleStartLiveSession — never touched again
+             mid-session, so its checked state can't drift out of sync
+             with a session already in progress. Purely additive: when
+             left unchecked, the session gets no `autoPaginate` field at
+             all and every existing BAŞLA/BİTİR code path is unchanged. -->
+        <!-- NEW FEATURE — INFINITE SCROLL (Auto Scroll). Same read-once-
+             at-BAŞLA, purely-additive contract as Auto Next above — when
+             left unchecked, the session gets no `autoScroll` field at
+             all and every existing code path (including Auto Next's
+             own) is unchanged. Placed in the same checkbox row as Auto
+             Next per spec: "place Auto Scroll near it in a clean way." -->
+        <div class="ws-checkbox-row">
+          <label><input type="checkbox" id="auto-next-toggle" /> <span data-i18n="liveSession.autoNextLabel">Auto Next</span></label>
+          <label><input type="checkbox" id="auto-scroll-toggle" /> <span data-i18n="liveSession.autoScrollLabel">Auto Scroll</span></label>
+        </div>
+
         <button id="basla-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="liveSession.basla">BAŞLA</button>
 
         <!-- ============ Gelişmiş (advanced/power-user escape hatch) ============
@@ -461,6 +479,24 @@
                never shows this at all, and keeps working exactly as
                before with the "Next Actions"/export UI always visible. -->
           <p id="live-session-status" class="ws-note ws-workflow-status" hidden></p>
+          <!-- NEW FEATURE — AUTOMATIC PAGINATION: a second status line,
+               shown only while an Auto-Next-enabled session's navigation
+               loop is actively running/navigating (never shown for a
+               session without autoPaginate at all — see popup.js's
+               renderLiveSessionUI). "DURDUR" stops future automatic
+               navigation only — it does NOT freeze the dataset or hide
+               the export gate the way BİTİR does; the session stays
+               'active' and BİTİR still works normally afterward. -->
+          <p id="auto-paginate-status" class="ws-note ws-workflow-status" hidden></p>
+          <!-- NEW FEATURE — INFINITE SCROLL (Auto Scroll): its own status
+               line, same reachability contract as auto-paginate-status
+               above (only shown for a session that actually has
+               autoScroll active). Reuses the SAME DURDUR button as Auto
+               Next — one unified Stop control (spec: "Do not clutter the
+               popup"; "If Auto Next already exists..."), which now stops
+               whichever of the two (or both) is currently running. -->
+          <p id="auto-scroll-status" class="ws-note ws-workflow-status" hidden></p>
+          <button id="durdur-btn" class="ws-btn ws-btn-secondary ws-btn-block" hidden data-i18n="liveSession.durdur">DURDUR</button>
           <button id="bitir-btn" class="ws-btn ws-btn-primary ws-btn-block" hidden data-i18n="liveSession.bitir">BİTİR</button>
 
           <!-- V1 SIMPLIFIED SESSION WORKFLOW DIAGNOSTICS (DEV ONLY) — same

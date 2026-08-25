@@ -180,6 +180,41 @@
         detachObserver();
         return null; // no session to log a diagnostic entry onto
       }
+      // NEW FEATURE — AUTOMATIC PAGINATION real-browser bug, found and
+      // fixed via real-site testing (books.toscrape.com): while Auto
+      // Next is actively running, content/autopaginate.js ALSO scrapes
+      // and persists this exact same session on every page (it has to —
+      // that's its whole job). Both this function and that one do
+      // "read-entire-session -> mutate a local copy -> write the whole
+      // thing back", with no coordination between them — on a freshly
+      // loaded page (both fire their own resume-on-load bootstrap at
+      // once), a real race was observed: this pass's own write landed
+      // AFTER autopaginate.js's had already advanced pageCount/status,
+      // and since this function never touches (or even knows about)
+      // `autoPaginate`, its own snapshot — read a few ms earlier, before
+      // that advance — silently carried the STALE pageCount/status
+      // forward and overwrote the newer values, leaving Auto Next
+      // permanently stuck. Deferring entirely to autopaginate.js
+      // whenever it's actively driving THIS session (it already does
+      // the exact same extract/classify/merge/persist work this
+      // function would have) removes the race at the source instead of
+      // trying to make either side more resilient to it. Zero effect
+      // when Auto Next is off/absent (the overwhelming default) — this
+      // check is simply never true, so this function's behavior for
+      // every session created before this feature existed, or with the
+      // toggle left off, is completely unchanged.
+      if (session.autoPaginate && session.autoPaginate.enabled && session.autoPaginate.status !== 'stopped') {
+        return null;
+      }
+      // NEW FEATURE — INFINITE SCROLL: identical reasoning/fix as
+      // autoPaginate directly above — content/autoscroll.js's own
+      // runUntilExhausted() ALSO scrapes and persists this exact same
+      // session on every cycle while it is active, so this pass must
+      // defer to it for exactly the same race-condition reason. Zero
+      // effect when Auto Scroll is off/absent.
+      if (session.autoScroll && session.autoScroll.enabled && session.autoScroll.status !== 'stopped') {
+        return null;
+      }
       // Defensive: WSRunState.mergeNewRows() unconditionally writes
       // progress.rowsCollected — this session's shape is deliberately
       // simpler than the full WSRunState object, so guarantee that one
