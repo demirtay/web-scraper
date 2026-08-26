@@ -10,7 +10,11 @@
     "test:browser:headed": "node e2e/run.js --headed",
     "test:browser:autopaginate": "node e2e/run.js --scenario=autopaginate-real-site --headed",
     "test:browser:autoscroll": "node e2e/run.js --scenario=autoscroll-real-site --headed",
-    "test:browser:cleaning": "node e2e/run.js --scenario=cleaning-real-site --headed"
+    "test:browser:cleaning": "node e2e/run.js --scenario=cleaning-real-site --headed",
+    "test:browser:discovery-pagination": "node e2e/run.js --scenario=discovery-pagination-real-site --headed",
+    "test:browser:discovery-scroll": "node e2e/run.js --scenario=discovery-scroll-real-site --headed",
+    "test:browser-safety": "node e2e/browser-ownership-safety-check.js",
+    "check-test-infra-safety": "node scripts/check-test-infra-safety.js"
   },
   "devDependencies": {
     "playwright": "^1.62.1"

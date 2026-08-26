@@ -362,7 +362,10 @@ var CONTENT_FILES = [
   'content/livewatch.js',
   'content/nextdetect.js',
   'content/autoscroll.js',
-  'content/autopaginate.js'
+  'content/autopaginate.js',
+  'utils/discovery.js',
+  'content/loadmore.js',
+  'content/discovery.js'
 ];
 // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next, optional, OFF by
 // default), content/nextdetect.js + content/autopaginate.js above:

@@ -503,7 +503,10 @@
     'content/livewatch.js',
     'content/nextdetect.js',
     'content/autoscroll.js',
-    'content/autopaginate.js'
+    'content/autopaginate.js',
+    'utils/discovery.js',
+    'content/loadmore.js',
+    'content/discovery.js'
   ];
   // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next): content/nextdetect.js
   // + content/autopaginate.js. See background.js's identical addition/
@@ -514,6 +517,14 @@
   // same complete-no-op guarantee, gated on an explicit autoScroll
   // field. See content/autoscroll.js's own header comment for how it
   // coexists with Auto Next when both are enabled.
+  // NEW FEATURE — AUTOMATIC DATA DISCOVERY ENGINE: utils/discovery.js
+  // (pure selection/bookkeeping core, also loaded below in popup.html for
+  // processAll()/processFirst(n)) + content/loadmore.js (generic Load
+  // More detection/click-to-exhaustion) + content/discovery.js (the
+  // orchestrator — see that file's own header for the full design). Same
+  // complete-no-op guarantee as the two features above: nothing here is
+  // ever invoked unless a session has an explicit `discovery` field,
+  // which only handleStartLiveSession's own BAŞLA flow below ever sets.
 
   var PREVIEW_LIMIT = 30;
   // V1.25 spec #3-4: the Results table has always been windowed at
@@ -2124,23 +2135,26 @@
       await chargeRunCredit('livesession_' + hostname + '_' + Date.now() + '_' + Math.random().toString(36).slice(2));
 
       var dedupeKey = pickDedupeKeyForColumns(state.columns);
-      // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next). Read exactly
-      // once, right here at BAŞLA, and never touched again mid-session —
-      // spec: "Default: OFF... after BAŞLA the scraper automatically
-      // continues" (a toggle change mid-session has no defined meaning,
-      // so it simply isn't read again). Left entirely OFF (the field is
-      // absent) unless the checkbox was checked, so a session created
-      // with the toggle OFF is byte-for-byte the same shape this feature
-      // has always produced — content/autopaginate.js's message handlers
-      // are never even reached for such a session.
-      var autoNextEnabled = !!(els.autoNextToggle && els.autoNextToggle.checked);
-      // NEW FEATURE — INFINITE SCROLL (Auto Scroll). Same read-once,
-      // never-touched-again-mid-session contract as autoNextEnabled
-      // above. Independent of Auto Next — either can be on alone, or
-      // both together (see content/autopaginate.js's own coexistence
-      // handling, which runs Auto Scroll to exhaustion on each page
-      // before looking for Next whenever both are enabled).
-      var autoScrollEnabled = !!(els.autoScrollToggle && els.autoScrollToggle.checked);
+      // AUTOMATIC DATA DISCOVERY ENGINE (mission's own central product
+      // rule): the user is never asked to choose pagination vs. infinite
+      // scroll vs. Load More vs. a hybrid of them — ClickScrape decides
+      // automatically (content/discovery.js) and always runs it. The
+      // legacy `auto-next-toggle`/`auto-scroll-toggle` checkboxes are
+      // deliberately left in the DOM (a later, purely-UI mission removes/
+      // hides them — see CLAUDE.md's own scope note for this mission) but
+      // their checked state is no longer read here: reading it would
+      // reintroduce exactly the "user must decide how the site exposes
+      // more results" choice this engine exists to remove. The legacy
+      // `session.autoPaginate`/`session.autoScroll` fields (still read by
+      // content/autopaginate.js's/content/autoscroll.js's OWN independent
+      // standalone message handlers and bootstraps) are deliberately never
+      // populated by this flow either — content/discovery.js owns its own,
+      // internally-seeded equivalents (session.autoScroll is, confusingly
+      // by name only, ALSO the field discovery.js's orchestrator seeds and
+      // drives directly, exactly mirroring content/autopaginate.js's own
+      // established combined-mode reuse of that same engine — see content/
+      // discovery.js's own header comment for the full reasoning) so there
+      // is never more than one driver of any given engine on a session.
       // Stored NORMALIZED (see WSRunState.normalizeHostname) so the
       // session's own record of "which site this is" always matches the
       // key it's actually filed under — a diagnostic reading s.hostname
@@ -2158,16 +2172,15 @@
         // is the only WSRunState-shaped field this deliberately-simpler
         // session object needs to stay compatible with that shared function.
         progress: { rowsCollected: 0 },
-        autoPaginate: autoNextEnabled ? {
-          enabled: true, status: 'running', stopReason: null,
-          pageCount: 1, maxPages: 20,
-          visitedUrls: pageUrl ? [pageUrl] : [], pageSignatures: [], updatedAt: Date.now()
-        } : null,
-        autoScroll: autoScrollEnabled ? {
-          enabled: true, status: 'running', stopReason: null,
-          cycleCount: 0, maxCycles: 30, consecutiveNoNewData: 0, maxNoNewDataAttempts: 3,
-          pageSignatures: [], updatedAt: Date.now()
-        } : null
+        discovery: (typeof WSDiscoveryCore !== 'undefined')
+          ? WSDiscoveryCore.createDiscoveryState({ startUrl: pageUrl })
+          // typeof-guarded exactly like every other optional-module check
+          // in this file (e.g. WSCleaners) — a context where
+          // utils/discovery.js somehow failed to load degrades to "no
+          // automatic discovery" rather than throwing; BAŞLA's own
+          // extraction/session/export path above is completely unaffected
+          // either way.
+          : null
       };
       // Seed rows/seenKeys via the EXACT SAME dedup function
       // content/livewatch.js's passive watcher will use for every later
@@ -2241,25 +2254,18 @@
         watchStarted = !!(watchRes && watchRes.ok);
       } catch (e) { watchStarted = false; }
 
-      // NEW FEATURE — AUTOMATIC PAGINATION: only sent when the toggle
-      // was ON (session.autoPaginate is null otherwise, and
-      // content/autopaginate.js's message handlers are never invoked
-      // for a session with no autoPaginate field at all). Best-effort,
-      // same non-blocking-warning treatment as START_LIVE_WATCH above —
-      // the session/initial results already succeeded regardless.
-      if (autoNextEnabled) {
-        try { await sendToContent({ type: 'START_AUTO_PAGINATE' }); }
-        catch (e) { console.error('[Web Scraper] START_AUTO_PAGINATE did not confirm — automatic pagination may not be active for this session.'); }
-      }
-      // NEW FEATURE — INFINITE SCROLL: only sent when Auto Scroll is ON
-      // AND Auto Next is OFF. When BOTH are on, content/autopaginate.js's
-      // own loop (already started above) calls
-      // WSAutoScroll.runUntilExhausted() directly itself — sending this
-      // message too would start a SECOND, competing scroll loop on the
-      // same page. Exactly one driver of scrolling, always.
-      if (autoScrollEnabled && !autoNextEnabled) {
-        try { await sendToContent({ type: 'START_AUTO_SCROLL' }); }
-        catch (e) { console.error('[Web Scraper] START_AUTO_SCROLL did not confirm — infinite scroll may not be active for this session.'); }
+      // AUTOMATIC DATA DISCOVERY ENGINE: always started, unconditionally
+      // — see the session-seeding comment above for why no toggle gates
+      // this. Best-effort, same non-blocking-warning treatment as
+      // START_LIVE_WATCH above — the session/initial results already
+      // succeeded regardless. A no-op if utils/discovery.js failed to
+      // load (session.discovery is null in that case, and content/
+      // discovery.js's own message handler is simply never reached
+      // meaningfully — same degrade-safely contract as every other
+      // typeof-guarded optional module in this file).
+      if (session.discovery) {
+        try { await sendToContent({ type: 'START_DISCOVERY' }); }
+        catch (e) { console.error('[Web Scraper] START_DISCOVERY did not confirm — automatic discovery may not be active for this session.'); }
       }
 
       attachLiveSessionStorageListener();
@@ -2297,6 +2303,12 @@
     // stop Auto Scroll immediately, stop Auto Next too if both are
     // running"). Harmless no-op if this session never had autoScroll on.
     try { await sendToContent({ type: 'STOP_AUTO_SCROLL' }); } catch (e) { /* best-effort */ }
+    // AUTOMATIC DATA DISCOVERY ENGINE: BİTİR must stop discovery too
+    // (mission section 23: Stop/Finish always preserves whatever was
+    // discovered so far) — harmless no-op if this session never had
+    // discovery on (pre-feature session, or utils/discovery.js failed to
+    // load at BAŞLA).
+    try { await sendToContent({ type: 'STOP_DISCOVERY' }); } catch (e) { /* best-effort */ }
     try { await chrome.scripting.unregisterContentScripts({ ids: ['ws-livewatch-' + hostname] }); } catch (e) { /* ignore — may never have been registered (permission declined, or same-page-only session) */ }
     activeLiveSession.status = 'finished';
     activeLiveSession.updatedAt = Date.now();
@@ -2317,9 +2329,14 @@
    * durdurBtn.hidden gating), so the guards below are defensive, not
    * load-bearing. */
   async function handleStopAutoPaginate() {
-    if (!activeLiveSession || !(activeLiveSession.autoPaginate || activeLiveSession.autoScroll)) return;
+    var discoveryActive = !!(activeLiveSession && activeLiveSession.discovery && activeLiveSession.discovery.status === 'discovering');
+    if (!activeLiveSession || !(activeLiveSession.autoPaginate || activeLiveSession.autoScroll || discoveryActive)) return;
     try { await sendToContent({ type: 'STOP_AUTO_PAGINATE' }); } catch (e) { /* best-effort */ }
     try { await sendToContent({ type: 'STOP_AUTO_SCROLL' }); } catch (e) { /* best-effort */ }
+    // AUTOMATIC DATA DISCOVERY ENGINE: DURDUR is now discovery's own Stop
+    // control too (mission section 23) — a harmless no-op message if this
+    // session never had discovery on.
+    try { await sendToContent({ type: 'STOP_DISCOVERY' }); } catch (e) { /* best-effort */ }
     // The content script's own write(s) (status:'stopped') will arrive
     // via the existing storage.onChanged listener and re-render — this
     // local update just makes the button/status feel instant rather
@@ -2331,6 +2348,11 @@
     if (activeLiveSession.autoScroll) {
       activeLiveSession.autoScroll.status = 'stopped';
       activeLiveSession.autoScroll.stopReason = 'user';
+    }
+    if (discoveryActive) {
+      activeLiveSession.discovery.status = 'discovery_stopped';
+      activeLiveSession.discovery.discoveryComplete = false;
+      activeLiveSession.discovery.stopReason = 'user';
     }
     renderLiveSessionUI();
   }
@@ -2367,30 +2389,57 @@
     // session (the toggle was OFF, or it's a pre-feature session)
     // leaves it permanently hidden, identical to before this feature
     // existed.
+    var discovery = activeLiveSession.discovery;
+    var discovering = !!(discovery && discovery.status === 'discovering');
+
+    // Legacy explicit-toggle sessions (autoPaginate/autoScroll set by the
+    // OLD checkbox-gated flow) keep their own original status-line
+    // behavior exactly. Only ever true for a pre-this-mission session —
+    // handleStartLiveSession no longer produces one — so this branch is
+    // dead code for every session created going forward, kept only so an
+    // already-open, in-flight legacy session (popup closed/reopened mid-
+    // session, right as this mission shipped) still renders correctly
+    // rather than going silent.
     var ap = activeLiveSession.autoPaginate;
     var apRunning = !!(ap && (ap.status === 'running' || ap.status === 'navigating'));
     if (els.autoPaginateStatus) {
-      els.autoPaginateStatus.hidden = !apRunning;
+      // AUTOMATIC DATA DISCOVERY ENGINE: reuses this SAME existing status
+      // line/translation key ("Scanning page {page}…" — already fits a
+      // page-count display regardless of pagination/scroll/hybrid) for
+      // the new engine's own pagesVisited counter, rather than adding a
+      // new UI string this mission's scope deliberately avoids (see
+      // CLAUDE.md's own "do not perform the large final popup redesign
+      // yet"). `discovering` and legacy `apRunning` can never both be
+      // true for the same session (discovery.js never populates
+      // session.autoPaginate), so this is never ambiguous about which
+      // count is actually being shown.
+      els.autoPaginateStatus.hidden = !(apRunning || discovering);
       if (apRunning) els.autoPaginateStatus.textContent = WSI18n.t('liveSession.scanningPage', { page: ap.pageCount });
+      else if (discovering) els.autoPaginateStatus.textContent = WSI18n.t('liveSession.scanningPage', { page: discovery.pagesVisited });
     }
 
-    // NEW FEATURE — INFINITE SCROLL: same contract, its own independent
-    // status line, shown only for a session that actually has
-    // autoScroll — can be true/hidden completely independently of
-    // autoPaginate above (either feature alone, or both together).
+    // NEW FEATURE — INFINITE SCROLL (legacy explicit toggle only): same
+    // dead-code-for-new-sessions caveat as apRunning above. Discovery's
+    // OWN internally-seeded session.autoScroll (see content/discovery.js)
+    // is deliberately EXCLUDED here (`!discovery` guard) — without it,
+    // this status line would flicker on/off as discovery's orchestrator
+    // internally arms/exhausts scrolling on each page, which is an
+    // implementation detail the mission's own status model (session.
+    // discovery.*) is what the future UI is meant to read instead.
     var as = activeLiveSession.autoScroll;
-    var asRunning = !!(as && as.status === 'running');
+    var asRunning = !!(as && as.status === 'running' && !discovery);
     if (els.autoScrollStatus) {
       els.autoScrollStatus.hidden = !asRunning;
       if (asRunning) els.autoScrollStatus.textContent = WSI18n.t('liveSession.scrollingRows', { count: activeLiveSession.rows.length });
     }
 
-    // DURDUR is the ONE shared Stop control for either/both features —
-    // shown whenever at least one of them is actively running. Only
-    // reachable while the session itself is still 'active' — a finished
-    // session (BİTİR) already hides bitirBtn/shows exportGate above, and
-    // DURDUR would be meaningless once the dataset is frozen.
-    if (els.durdurBtn) els.durdurBtn.hidden = !((apRunning || asRunning) && activeLiveSession.status === 'active');
+    // DURDUR is the ONE shared Stop control for legacy Auto Next/Auto
+    // Scroll AND (now) automatic discovery — shown whenever any of them
+    // is actively running. Only reachable while the session itself is
+    // still 'active' — a finished session (BİTİR) already hides
+    // bitirBtn/shows exportGate above, and DURDUR would be meaningless
+    // once the dataset is frozen.
+    if (els.durdurBtn) els.durdurBtn.hidden = !((apRunning || asRunning || discovering) && activeLiveSession.status === 'active');
   }
 
   /** Mirrors attachRunStorageListener's exact existing pattern: a live
@@ -2404,10 +2453,107 @@
       var change = changes[liveSessionKey(hostname)];
       if (!change || !change.newValue) return;
       activeLiveSession = change.newValue;
-      rawRows = activeLiveSession.rows;
+      // AUTOMATIC DATA DISCOVERY ENGINE / PROCESSING boundary: once the
+      // user has chosen ALL or FIRST N (processAll()/processFirst(n)
+      // below), `rawRows` is a deliberate, possibly-smaller SELECTION of
+      // activeLiveSession.rows, not a mirror of it — a defensive guard
+      // here (discovery itself always stops writing before processing
+      // can begin, per the mission's own "only after discovery completes"
+      // flow, so this should never actually fire in practice) against a
+      // stray late storage write silently re-expanding an already-chosen
+      // FIRST N selection back to the full discovered set.
+      var alreadyProcessed = !!(activeLiveSession.discovery && activeLiveSession.discovery.status &&
+        activeLiveSession.discovery.status.indexOf('processing') === 0);
+      if (!alreadyProcessed) rawRows = activeLiveSession.rows;
       invalidateTransformCache();
       renderResults();
     });
+  }
+
+  // =====================================================================
+  // AUTOMATIC DATA DISCOVERY ENGINE — PROCESSING API (mission section 27).
+  // Discovery (content/discovery.js) already accumulated the full,
+  // deduplicated, stably-ordered dataset directly into
+  // activeLiveSession.rows — the exact same session.rows/mergeNewRows
+  // mechanism BAŞLA/Auto Next/Auto Scroll always used before this
+  // mission. Processing is therefore never a second extraction pass
+  // (mission section 9): it is purely "select ALL or the FIRST N of the
+  // already-fully-extracted registry, in stable discovery order" (pure
+  // logic lives in utils/discovery.js, loaded here too), then hand that
+  // selection to the completely unmodified existing pipeline (rawRows ->
+  // computeTransformedResult -> Data Cleaning -> preview/export).
+  //
+  // No dedicated UI wires these yet (that's the next, UI-focused
+  // mission per CLAUDE.md's own explicit scope note) — exposed instead
+  // through window.__wsDiscoveryTestHooks below, mirroring this file's
+  // own established "exposed for targeted testing only" convention
+  // (e.g. WSAutoPaginate.runAutoPaginateLoop, WSLiveWatch.runDetectionPass).
+  // =====================================================================
+
+  /** Shared tail for processAll()/processFirst(): applies the selection
+   * to the real, unmodified pipeline exactly like every other
+   * rawRows-populating code path in this file, marks discovery's own
+   * status model (mission section 25/27), and persists it. */
+  function applyProcessingSelection(selectedRows, mode, requested, effective, normalized) {
+    rawRows = selectedRows;
+    invalidateTransformCache();
+    if (activeLiveSession) {
+      activeLiveSession.discovery = activeLiveSession.discovery || {};
+      activeLiveSession.discovery.status = 'processing_complete';
+      activeLiveSession.discovery.processingSelection = { mode: mode, requested: requested, effective: effective, processedCount: selectedRows.length };
+      activeLiveSession.discovery.updatedAt = Date.now();
+      liveSessionSet(hostname, activeLiveSession);
+    }
+    renderResults();
+    return { ok: true, mode: mode, requested: requested, effective: effective, normalized: !!normalized, processedCount: selectedRows.length };
+  }
+
+  /** processAll() — mission section 27/49: selects every discovered
+   * unique record for processing. */
+  function processAll() {
+    if (!activeLiveSession) return { ok: false, error: 'no-active-session' };
+    if (typeof WSDiscoveryCore === 'undefined') return { ok: false, error: 'discovery-core-unavailable' };
+    var selected = WSDiscoveryCore.selectRows(activeLiveSession.rows, 'all', null);
+    return applyProcessingSelection(selected, 'all', activeLiveSession.rows.length, activeLiveSession.rows.length, false);
+  }
+
+  /** processFirst(n) — mission section 27/48/50: selects exactly the
+   * first N unique discovery entries in stable discovery order. Never
+   * fails catastrophically on bad input (mission section 50: 0, -5, 2.5,
+   * "abc", or an N larger than what was actually discovered) — returns a
+   * structured `{ok:false, error}` for a genuinely invalid N, and safely
+   * normalizes (clamps) an over-large N down to whatever was actually
+   * discovered rather than fabricating rows past that (mission section
+   * 36/27). */
+  function processFirst(n) {
+    if (!activeLiveSession) return { ok: false, error: 'no-active-session' };
+    if (typeof WSDiscoveryCore === 'undefined') return { ok: false, error: 'discovery-core-unavailable' };
+    var validation = WSDiscoveryCore.validateSelection(activeLiveSession.rows.length, 'first', n);
+    if (!validation.ok) return validation;
+    var selected = WSDiscoveryCore.selectRows(activeLiveSession.rows, 'first', validation.effective);
+    return applyProcessingSelection(selected, 'first', validation.requested, validation.effective, validation.normalized);
+  }
+
+  // TEST-ONLY SEAM — never referenced by any real user-facing control.
+  // Exists solely so an external harness can invoke the real
+  // processAll()/processFirst(n) selection logic against the real
+  // activeLiveSession: this project's own JSDOM popup-integration
+  // convention, AND this project's real-browser harness, where the
+  // native toolbar popup itself cannot be driven at all (see
+  // e2e/run.js's own header comment) — exactly the same reachability
+  // gap "Use internal/test command if necessary" (mission section 59)
+  // anticipates. Carries no security/licensing implications (it only
+  // reaches the same data-selection/export pipeline every real BAŞLA
+  // session already fully exposes) — not the same risk category as the
+  // QA trial/license bypass controls, which stay behind their own
+  // separate isDevelopmentInstall() gate untouched by this.
+  if (typeof window !== 'undefined') {
+    window.__wsDiscoveryTestHooks = {
+      processAll: processAll,
+      processFirst: processFirst,
+      getActiveLiveSession: function () { return activeLiveSession; },
+      getRawRows: function () { return rawRows; }
+    };
   }
 
   /** Called once from init(): if a live-collect session already exists

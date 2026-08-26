@@ -136,8 +136,47 @@ async function launchWithExtension(opts) {
   }
   log.info('Launched browser: ' + usedBrowser + ', headless=false, persistent context.');
 
+  // ===================================================================
+  // BROWSER PROCESS SAFETY — CRITICAL (see CLAUDE.md, same section name).
+  //
+  // OWNERSHIP MODEL: `context` (above) is the ONLY handle to the browser
+  // process this exact launchWithExtension() call created — Playwright's
+  // driver established a private pipe/connection to that ONE process at
+  // launch time, keyed to this in-memory object, not to a process name or
+  // a PID this code looks up later. closeUp() below closes EXACTLY that
+  // object and nothing else — structurally incapable of referring to any
+  // other browser instance, however many chrome.exe/msedge.exe/etc.
+  // processes (a user's own personal windows included) happen to be
+  // running on the machine at the same time. This is what "ownership" is
+  // recorded as in this codebase: not a PID list, not a process name —
+  // the object reference itself, returned once, held only by whichever
+  // caller launched it.
+  //
+  // NEVER change this function to call any OS-level, name/image-based
+  // process-kill command (taskkill /IM, pkill, killall, Stop-Process
+  // -Name, a Get-Process|Stop-Process pipeline, wmic process ... delete)
+  // as a "just in case" cleanup for an orphaned/leftover browser —
+  // every one of those is indiscriminate system-wide and could close a
+  // real user's own browser windows. A PreToolUse hook
+  // (.claude/hooks/block-browser-process-kill.js) additionally blocks
+  // any agent session in this repo from running such a command directly
+  // via the Bash/PowerShell tools, but that is defense-in-depth, not a
+  // substitute for this file's own architecture staying ownership-scoped.
+  //
+  // If `context` were ever undefined/unreachable here (it can't be — this
+  // function already returned control to its caller only after a
+  // successful launch above), the correct behavior is to do nothing and
+  // report it, never to fall back to a broad kill to "be safe" — an
+  // orphaned test browser left open is an acceptable, recoverable outcome
+  // (mission-level guidance: "Leaving an automated test browser open is
+  // preferable to accidentally closing a user-owned browser"); killing an
+  // unrelated user browser is not.
+  // ===================================================================
+  var alreadyClosed = false;
   async function closeUp(deleteProfile) {
-    try { await context.close(); } catch (e) { /* already closed */ }
+    if (alreadyClosed) return; // idempotent — a second call is a no-op, never a re-attempt against a stale/reused handle
+    alreadyClosed = true;
+    try { await context.close(); } catch (e) { /* already closed by the browser itself (e.g. window closed manually) */ }
     if (deleteProfile !== false) {
       try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch (e) { /* best-effort cleanup */ }
     }

@@ -36,6 +36,89 @@ At the start of every session, before doing anything else:
    abandoning the open one — but never let an already-CLOSED mission
    block starting new work.
 
+## Browser Process Safety — CRITICAL
+
+**This section applies to EVERY future mission and EVERY agent working in
+this repository, permanently, with no exceptions and no expiry.** It
+exists because a real-browser test run in this project has, in the past,
+closed or interfered with the user's own already-running personal Chrome
+windows. That must never happen again.
+
+1. **NEVER close, kill, terminate, restart, reuse, attach to, or
+   interfere with any Chrome/Chromium/browser process that was not
+   explicitly created by the current automated test run.** The user's
+   personal Chrome windows and tabs — profiles already running before a
+   test starts, their normal Chrome profile, their existing tabs/windows,
+   anything else they have open, any browser they opened manually — are
+   completely off-limits, always.
+
+2. **Automated tests must launch their own isolated browser instance**
+   (Playwright-managed Chromium, a dedicated/repository-specific temp
+   user-data directory — see `e2e/lib/browser.js`'s `launchWithExtension`)
+   and must establish ownership of exactly that instance before running
+   anything. In this codebase, ownership IS the in-memory `context`
+   object `launchWithExtension()` returns — Playwright's own driver binds
+   that object to the ONE process it just spawned, not to a process name
+   or a PID looked up later, so closing it structurally cannot reach any
+   other browser instance, however many are running on the machine.
+
+3. **Cleanup may ONLY close the browser context/page/process that THIS
+   test run created** — via `closeUp()` (which calls Playwright's own
+   `context.close()`), never anything broader. Never use, and never add,
+   a broad OS-level, name/image-based process-kill as cleanup —
+   `taskkill /IM`, `pkill`, `killall`, `Stop-Process -Name`, a
+   `Get-Process | Stop-Process` pipeline, `wmic process ... delete`, or
+   any equivalent — for a browser or for anything else. These are
+   indiscriminate across the whole system by construction: they kill
+   every matching process, real user windows included. Precise,
+   PID-scoped termination of a specific process this run itself already
+   identified (`taskkill /PID <pid>` with no `/IM`, `kill <pid>`,
+   `Stop-Process -Id <pid>` with no `-Name`) is the only OS-level
+   exception, and even that should rarely be needed — prefer the owned
+   Playwright object's own `close()` every time.
+
+4. **Do not free RAM or disk by closing the user's applications, Chrome
+   windows, VS Code windows, or any other of their processes** — ever,
+   for any reason, including "the machine is low on resources." If system
+   resources genuinely appear insufficient to proceed, STOP and report
+   exactly:
+
+   ```
+   BLOCKED: INSUFFICIENT SYSTEM RESOURCES
+   ```
+
+   then wait for the user. Do not attempt a workaround that touches
+   anything you did not launch yourself.
+
+5. **If browser ownership cannot be determined with certainty, DO NOT
+   CLOSE THE BROWSER.** An orphaned automated-test browser window left
+   open is a fully acceptable, recoverable outcome. Accidentally closing
+   a window that turns out to belong to the user is not, and cannot be
+   undone.
+
+6. **Technical enforcement, not just this document:**
+   `.claude/hooks/block-browser-process-kill.js` is wired as a
+   `PreToolUse` hook (see `.claude/settings.json`) that blocks any
+   Bash/PowerShell tool call in this repository matching a broad,
+   name-based process-kill pattern, live, before it can run — this is
+   not optional guidance an agent can talk itself past; a matching
+   command is refused by the tool layer itself. `npm run
+   check-test-infra-safety` (`scripts/check-test-infra-safety.js`)
+   statically scans this repo's own test infrastructure (`e2e/`,
+   `scripts/`, `package.json`) for the same patterns, so a regression
+   introduced through any other path (a pasted one-liner, a future
+   script, CI) is still caught. `npm run test:browser-safety`
+   (`e2e/browser-ownership-safety-check.js`) is a live regression test
+   that launches two independent real browser instances and proves
+   closing one never affects the other — run it whenever `e2e/lib/
+   browser.js`'s own cleanup logic changes.
+
+7. **Before adding or changing ANY code that launches or closes a
+   browser** (in `e2e/` or anywhere else a future mission might add),
+   re-read this section first, and re-run `npm run test:browser-safety`
+   and `npm run check-test-infra-safety` afterward to confirm the
+   ownership/cleanup guarantee still holds.
+
 ## CORE RULE — see a task through, not to the first attempt
 
 For every development task assigned in this repository, do not stop
@@ -118,6 +201,11 @@ based on an actual observed failure or an actual unmet acceptance
 criterion, never repeated for its own sake.
 
 ## Real-browser verification (feature development loop)
+
+**Before running any real-browser test, re-read "Browser Process Safety
+— CRITICAL" above.** Every step below launches/uses a real Chrome
+process — cleanup must stay scoped to exactly the instance that step
+launched, never a broad kill.
 
 For any change that touches user-visible or page-interaction behavior
 (popup UI, content-script extraction/injection, messaging between

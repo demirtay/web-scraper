@@ -506,8 +506,23 @@
   // own bootstrap calls runUntilExhausted() itself in that combined
   // case — see content/autopaginate.js) to guarantee exactly one
   // scroll-loop per session, never two competing instances.
+  // NEW FEATURE — AUTOMATIC DATA DISCOVERY ENGINE: content/discovery.js
+  // seeds and drives this EXACT SAME session.autoScroll sub-object
+  // automatically (no user toggle), calling runUntilExhausted() directly
+  // itself, exactly like content/autopaginate.js's own combined mode
+  // already did before discovery.js existed. Without this exclusion, a
+  // session actively owned by discovery.js would ALSO be picked up by
+  // this bootstrap the moment any fresh content-script instance loads
+  // (a real Next navigation, an SPA route change) — two independent
+  // loops racing to scroll/scrape/persist the same session, the exact
+  // failure class content/livewatch.js's own header comment documents in
+  // detail for the autoPaginate/autoScroll pair. Mirrors the
+  // `!(session.autoPaginate && session.autoPaginate.enabled)` exclusion
+  // immediately to its left — same reasoning, one more legitimate owner.
   getSession(hostname()).then(function (session) {
-    if (stillRunning(session) && !(session.autoPaginate && session.autoPaginate.enabled)) {
+    var ownedByDiscovery = !!(session && session.discovery && session.discovery.enabled &&
+      session.discovery.status === 'discovering');
+    if (stillRunning(session) && !(session.autoPaginate && session.autoPaginate.enabled) && !ownedByDiscovery) {
       console.log(LOG_PREFIX, 'bootstrap: resuming active auto-scroll session', session.sessionId);
       runUntilExhausted(session, hostname());
     }

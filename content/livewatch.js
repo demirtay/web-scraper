@@ -215,6 +215,16 @@
       if (session.autoScroll && session.autoScroll.enabled && session.autoScroll.status !== 'stopped') {
         return null;
       }
+      // NEW FEATURE — AUTOMATIC DATA DISCOVERY ENGINE: identical
+      // reasoning/fix as autoPaginate/autoScroll directly above —
+      // content/discovery.js's own orchestrator loop ALSO scrapes and
+      // persists this exact same session throughout discovery (it drives
+      // Auto Scroll/Load More/Next itself), so this pass must defer to it
+      // for exactly the same stale-overwrite race reason. Zero effect on
+      // any session discovery never touched.
+      if (session.discovery && session.discovery.enabled && session.discovery.status === 'discovering') {
+        return null;
+      }
       // Defensive: WSRunState.mergeNewRows() unconditionally writes
       // progress.rowsCollected — this session's shape is deliberately
       // simpler than the full WSRunState object, so guarantee that one

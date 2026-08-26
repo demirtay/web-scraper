@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/block-browser-process-kill.js",
+            "timeout": 10,
+            "statusMessage": "Checking for unsafe browser process termination…"
+          }
+        ]
+      }
+    ]
+  }
+}
