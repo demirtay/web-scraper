@@ -136,6 +136,24 @@
     try { return containerSelector ? document.querySelectorAll(containerSelector).length : 0; } catch (e) { return 0; }
   }
 
+  /** BUG REOPEN (action-ownership diagnostics): a lightweight, diagnostic-
+   * ONLY content fingerprint for STEP 4's own pagination-attempt record
+   * (below) — proves whether the on-screen content actually changed
+   * around the exact moment THIS script issued a Next-control trigger,
+   * independent of session.rows (which may not have grown yet at
+   * transition time — see finalizeComplete's own note on this). Never
+   * fed into any control-flow/loop-detection decision (that stays
+   * WSRunState.computePageSignature/buildTraversalStateId, unmodified) —
+   * purely an observability aid for real-browser verification. */
+  function diagFingerprint(containerSelector) {
+    try {
+      var count = candidateCount(containerSelector);
+      var first = containerSelector ? document.querySelector(containerSelector) : null;
+      var sample = first ? (first.textContent || '').trim().slice(0, 200) : (document.body ? document.body.textContent.trim().slice(0, 200) : '');
+      return count + ':' + sample.length + ':' + sample;
+    } catch (e) { return 'error:' + (e && e.message); }
+  }
+
   /** Local copy of the same extract -> classify -> dedupe/merge primitive
    * every other collection path in this project uses (kept local, not a
    * cross-file call — matches content/autopaginate.js's/content/
@@ -360,7 +378,32 @@
         // may never have landed. Forcing it to 0 here means this page's
         // own candidate count is never wrongly compared against a stale
         // baseline carried over from the page before it.
-        if (firstIteration && !skipInitialScrape) session.discovery.currentPageBaselineCandidateCount = 0;
+        if (firstIteration && !skipInitialScrape) {
+          session.discovery.currentPageBaselineCandidateCount = 0;
+          // BUG REOPEN — real-browser-confirmed race (books.toscrape.com):
+          // the OUTGOING instance's own final STEP-4 write
+          // (paginationActionSucceeded:true, outcome, toUrl,
+          // fingerprintAfter) — dispatched only AFTER
+          // waitForNavigationOrMutation already resolved 'url-changed' —
+          // can be lost when the real navigation tears down its script
+          // context before that async chrome.storage.local.set() call
+          // ever completes (the EARLIER 'issued:true' write, dispatched
+          // BEFORE the trigger, reliably survives this same race — see
+          // that write's own comment). THIS instance existing at all,
+          // freshly bootstrapped on a genuinely new page, is itself
+          // conclusive proof the navigation succeeded — reconcile any
+          // attempt the outgoing instance left dangling (issued but never
+          // confirmed) rather than leaving the diagnostic permanently
+          // incomplete despite discovery having plainly kept working.
+          var dangling = session.discovery.lastPaginationAttempt;
+          if (dangling && dangling.paginationActionIssued === true && dangling.paginationActionSucceeded !== true) {
+            dangling.paginationActionSucceeded = true;
+            dangling.outcome = dangling.outcome || 'url-changed-confirmed-by-resume';
+            dangling.toUrl = location.href;
+            dangling.fingerprintAfter = diagFingerprint(cs);
+            console.log(LOG_PREFIX, 'reconciled a dangling pagination attempt from the outgoing (destroyed) instance', dangling);
+          }
+        }
 
         var passResult;
         try {
@@ -437,39 +480,179 @@
 
       // ---- STEP 4: current page genuinely exhausted — look for a
       // legitimate next-page control (existing, unmodified detector) ----
+      // BUG REOPEN — ACTION-OWNERSHIP DIAGNOSTICS: every field this
+      // mission's own spec names (nextCandidateFound, paginationActionIssued,
+      // paginationActionSucceeded, fromUrl, toUrl, fingerprintBefore,
+      // fingerprintAfter, uniqueBefore, uniqueAfter) is captured into
+      // `attemptDiag` below and persisted onto
+      // session.discovery.lastPaginationAttempt (readable directly from
+      // chrome.storage.local by a real-browser test, not merely inferred
+      // from pagesVisited growth) AND emitted via console.log so it shows
+      // up in a captured page-console transcript too.
+      // `paginationActionIssued` is set ONLY inside wrappedTrigger below,
+      // at the exact moment THIS script actually invokes the detected
+      // control's own trigger function — proving the extension itself
+      // caused the transition, never merely observed one that happened on
+      // its own (a manual click, an unrelated timer, etc.).
       var nextInfo;
       try { nextInfo = root.WSNextDetect.findNextControl(cs); } catch (e) { nextInfo = { found: false }; }
-      if (!nextInfo.found) { await finalizeComplete(session, host, 'no-more-mechanisms'); return; }
-      if (nextInfo.disabled) { await finalizeComplete(session, host, 'next-disabled'); return; }
+      var attemptDiag = {
+        at: Date.now(),
+        nextCandidateFound: !!nextInfo.found,
+        method: nextInfo.method || null,
+        disabled: !!nextInfo.disabled,
+        fromUrl: location.href,
+        fingerprintBefore: diagFingerprint(cs),
+        uniqueBefore: session.rows.length,
+        paginationActionIssued: false,
+        paginationActionSucceeded: false,
+        toUrl: null,
+        fingerprintAfter: null,
+        uniqueAfter: null,
+        outcome: null
+      };
+      if (!nextInfo.found) {
+        attemptDiag.outcome = 'no-next-candidate';
+        session.discovery.lastPaginationAttempt = attemptDiag;
+        await setSession(host, session);
+        console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        await finalizeComplete(session, host, 'no-more-mechanisms');
+        return;
+      }
+      if (nextInfo.disabled) {
+        attemptDiag.outcome = 'next-disabled';
+        session.discovery.lastPaginationAttempt = attemptDiag;
+        await setSession(host, session);
+        console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        await finalizeComplete(session, host, 'next-disabled');
+        return;
+      }
 
       if (session.discovery.pagesVisited >= session.discovery.maxPages) {
+        attemptDiag.outcome = 'max-pages-safety-limit';
+        session.discovery.lastPaginationAttempt = attemptDiag;
+        await setSession(host, session);
+        console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
         await finalizeStopped(session, host, 'max-pages-safety-limit', true);
         return;
       }
 
       var urlBefore = location.href;
+      // REAL BUG found and fixed via real-browser testing (books.toscrape.com,
+      // this exact mission): a real full-page navigation can — and, on a
+      // real site, reliably does — destroy this outgoing content-script
+      // instance in the SAME synchronous tick the trigger fires
+      // (`nextInfo.trigger()` for a real <a href> control performs actual
+      // browser navigation; navigateTrigger's `location.href = url` even
+      // more directly), well before any async `chrome.storage.local.set()`
+      // issued AFTER that point is guaranteed to have even been DISPATCHED
+      // to the browser process, let alone completed — the exact same race
+      // class this file's own `pagesVisited` fix (above, in the per-page
+      // scrape branch) already fights, for the same underlying reason.
+      // Confirmed directly: a first version of this diagnostic that only
+      // wrote `lastPaginationAttempt` AFTER `waitForNavigationOrMutation`
+      // resolved lost that write on a real navigation nearly every time —
+      // pagesVisited (written earlier, safely pre-navigation, by the FRESH
+      // page's own next scrape pass) still advanced correctly, but the
+      // diagnostic proving the extension itself issued the action was
+      // silently empty, which would make this mission's own real-browser
+      // verification test flag a false failure. Fixed the same way: get
+      // `paginationActionIssued: true` written and DISPATCHED to
+      // chrome.storage.local's browser-side backend BEFORE the trigger is
+      // ever invoked, not after.
+      session.discovery.lastPaginationAttempt = attemptDiag;
+      var wrappedTrigger = function () {
+        attemptDiag.paginationActionIssued = true;
+        console.log(LOG_PREFIX, 'ISSUING pagination action (extension-driven, no user click involved)', { method: nextInfo.method, fromUrl: urlBefore });
+        // Fire-and-forget, deliberately NOT awaited (there is no
+        // synchronous opportunity to await anything between "decide to
+        // trigger" and "actually trigger" — see the comment above): a raw
+        // chrome.storage.local.set() call still DISPATCHES its IPC message
+        // to the browser process the moment it's called, independent of
+        // whether this renderer is still alive by the time its own
+        // callback would have fired. Uses the plain API directly (not
+        // setSession's Promise wrapper) purely to avoid any unnecessary
+        // microtask indirection between this line and the trigger call
+        // immediately below it.
+        try {
+          var raceData = {};
+          raceData[sessionKey(host)] = session;
+          chrome.storage.local.set(raceData);
+        } catch (e) { /* best-effort only — the outer setSession call already persisted issued:false a moment ago */ }
+        try {
+          nextInfo.trigger();
+        } catch (e) {
+          // BUG REOPEN root-cause hardening: this call runs SYNCHRONOUSLY
+          // inside content/domwait.js's own Promise executor
+          // (waitForNavigationOrMutation) — on a real, dynamically-
+          // rendered page the detected control can be removed/replaced
+          // between detection and invocation (or otherwise throw), and an
+          // uncaught throw here would silently REJECT that promise. With
+          // nothing downstream ever catching a rejection at that exact
+          // point, the entire discovery run would freeze permanently at
+          // 'discovering' with zero further activity and no error ever
+          // surfaced — precisely this bug report's own symptom. Catching
+          // it here keeps this one attempt's diagnostics honest
+          // (issued:true, succeeded:false via the timeout branch below)
+          // without ever letting a site-side DOM quirk kill the whole
+          // loop silently. (runDiscoveryLoopSafe, below, is the second,
+          // outer layer of the same guarantee for any OTHER unguarded
+          // exception anywhere else in this loop.)
+          attemptDiag.triggerError = (e && e.message) || String(e);
+          console.error(LOG_PREFIX, 'pagination trigger threw — attempt will honestly report failure, not hang', attemptDiag.triggerError);
+        }
+      };
       await setSession(host, session);
       var navResult = await root.WSDomWait.waitForNavigationOrMutation({
-        timeoutMs: NAV_TIMEOUT_MS, urlBefore: urlBefore, signal: controller.signal, trigger: nextInfo.trigger
+        timeoutMs: NAV_TIMEOUT_MS, urlBefore: urlBefore, signal: controller.signal, trigger: wrappedTrigger
       });
-      if (navResult === 'aborted') return;
+      if (navResult === 'aborted') {
+        attemptDiag.outcome = 'aborted';
+        console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        return;
+      }
 
       if (navResult === 'timeout') {
+        attemptDiag.outcome = 'timeout';
+        attemptDiag.toUrl = location.href;
+        attemptDiag.fingerprintAfter = diagFingerprint(cs);
+        console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        // A timeout means NO navigation was ever observed — unlike the
+        // url-changed/dom-changed branches below, this script instance is
+        // guaranteed still alive (nothing destroyed it), so — unlike
+        // those branches — persisting the full attemptDiag directly here
+        // is safe and reliable, not subject to the outgoing-instance
+        // race documented above finalizeStopped's own internal re-read
+        // would otherwise silently drop this write.
         var stalled = await getSession(host) || session;
+        if (stalled.discovery) {
+          stalled.discovery.lastPaginationAttempt = attemptDiag;
+          await setSession(host, stalled);
+        }
         if (stillRunning(stalled)) await finalizeStopped(stalled, host, 'page-load-timeout');
         return;
       }
 
+      attemptDiag.outcome = navResult; // 'url-changed' | 'dom-changed'
+      attemptDiag.paginationActionSucceeded = true;
+      attemptDiag.toUrl = location.href;
+      attemptDiag.fingerprintAfter = diagFingerprint(cs);
+
       session = await getSession(host);
       if (!stillRunning(session)) return;
+      attemptDiag.uniqueAfter = session.rows.length;
       var newUrl = location.href;
 
       if (navResult === 'url-changed') {
         if (!root.WSRunState.isSameOrigin(newUrl, session.hostname)) {
+          session.discovery.lastPaginationAttempt = attemptDiag;
+          console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
           await finalizeComplete(session, host, 'origin-changed');
           return;
         }
         if (session.discovery.visitedUrls.indexOf(newUrl) !== -1) {
+          session.discovery.lastPaginationAttempt = attemptDiag;
+          console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
           await finalizeComplete(session, host, 'url-repeat');
           return;
         }
@@ -478,6 +661,8 @@
         session = ensureInternalEngines(session);
         session = rearmEnginesForNewPage(session);
         session.discovery = root.WSDiscoveryCore.onPageAdvance(session.discovery);
+        session.discovery.lastPaginationAttempt = attemptDiag;
+        console.log(LOG_PREFIX, 'PAGINATION ATTEMPT (real navigation confirmed — new page instance resumes)', attemptDiag);
         await setSession(host, session);
         // A real navigation just destroyed (or is about to destroy) this
         // script instance — the freshly-injected instance on the new page
@@ -493,8 +678,53 @@
       session = ensureInternalEngines(session);
       session = rearmEnginesForNewPage(session);
       session.discovery = root.WSDiscoveryCore.onPageAdvance(session.discovery);
+      session.discovery.lastPaginationAttempt = attemptDiag;
+      console.log(LOG_PREFIX, 'PAGINATION ATTEMPT (SPA-style content swap confirmed)', attemptDiag);
       await setSession(host, session);
     }
+  }
+
+  /** BUG REOPEN (real user-flow report: discovery status stuck at
+   * "discovering" forever, no autonomous navigation, only manual
+   * navigation ever grew the dataset): runDiscoveryLoop() is invoked
+   * fire-and-forget from both the START_DISCOVERY handler and this
+   * file's own bootstrap-resume below — an unhandled rejection ANYWHERE
+   * in that async function (a real DOM/extraction exception not already
+   * caught by scrapeCurrentPage's own try/catch, e.g. from
+   * WSAutoScroll.runUntilExhausted/WSLoadMore.runUntilExhausted/
+   * WSDiscoveryCore's own helpers) would previously kill the loop
+   * completely SILENTLY: no finalize call ever runs, so
+   * session.discovery.status stays frozen at 'discovering' forever with
+   * no record of why — indistinguishable, from the popup's own UI, from
+   * "still legitimately working." This wrapper is the one place both
+   * call sites now go through: it never changes what the loop itself
+   * does, it only guarantees that if the loop's own promise ever
+   * rejects, that failure becomes a visible, honest terminal state
+   * (discovery.status = 'error') instead of a silent, unexplained hang. */
+  function runDiscoveryLoopSafe(host, skipInitialScrape) {
+    var loopPromise;
+    try {
+      loopPromise = runDiscoveryLoop(host, skipInitialScrape);
+    } catch (e) {
+      loopPromise = Promise.reject(e);
+    }
+    return loopPromise.catch(function (err) {
+      var msg = (err && err.message) || String(err);
+      console.error(LOG_PREFIX, 'runDiscoveryLoop THREW — discovery loop terminated unexpectedly:', msg, err && err.stack);
+      return getSession(host).then(function (session) {
+        if (!session || !session.discovery) return;
+        // Never clobber a real terminal state (complete/stopped) that a
+        // finalize* call already committed before the exception hit —
+        // same "only write if still discovering" guard finalizeComplete/
+        // finalizeStopped already use, for the same reason.
+        if (session.discovery.status !== 'discovering') return;
+        session.discovery.status = 'error';
+        session.discovery.stopReason = 'internal-error: ' + msg;
+        session.discovery.discoveredUnique = session.rows.length;
+        session.discovery.updatedAt = Date.now();
+        return setSession(host, session);
+      }).catch(function () { /* best-effort — never throw out of an already-failing path */ });
+    });
   }
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
@@ -509,7 +739,7 @@
       // discovery, e.g. after a real navigation, goes through this file's
       // own bootstrap below instead, which never touched this flag).
       discoveryStopRequested = false;
-      runDiscoveryLoop(hostname(), true);
+      runDiscoveryLoopSafe(hostname(), true);
       sendResponse({ ok: true });
       return true;
     }
@@ -554,7 +784,7 @@
   getSession(hostname()).then(function (session) {
     if (stillRunning(session)) {
       console.log(LOG_PREFIX, 'bootstrap: resuming active discovery session', session.sessionId);
-      runDiscoveryLoop(hostname());
+      runDiscoveryLoopSafe(hostname());
     }
   }).catch(function () { /* nothing to resume */ });
 

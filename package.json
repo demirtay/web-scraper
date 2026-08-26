@@ -12,6 +12,7 @@
     "test:browser:autoscroll": "node e2e/run.js --scenario=autoscroll-real-site --headed",
     "test:browser:cleaning": "node e2e/run.js --scenario=cleaning-real-site --headed",
     "test:browser:discovery-pagination": "node e2e/run.js --scenario=discovery-pagination-real-site --headed",
+    "test:browser:discovery-start-flow": "node e2e/run.js --scenario=discovery-popup-start-real-site --headed",
     "test:browser:discovery-scroll": "node e2e/run.js --scenario=discovery-scroll-real-site --headed",
     "test:browser-safety": "node e2e/browser-ownership-safety-check.js",
     "check-test-infra-safety": "node scripts/check-test-infra-safety.js"

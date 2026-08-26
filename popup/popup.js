@@ -2494,7 +2494,16 @@
     els.discoveryPanel.hidden = false;
 
     var isDiscovering = discovery.status === 'discovering';
-    var isDone = discovery.status === 'discovery_stopped' || discovery.status === 'discovery_complete';
+    // 'error' (BUG REOPEN diagnostics addition — content/discovery.js's
+    // runDiscoveryLoopSafe wrapper): a real internal exception that
+    // killed the loop is a terminal state exactly like stopped/complete
+    // for THIS panel's purposes — the choice panel (ALL/FIRST N over
+    // whatever was discovered before the failure) must still be offered,
+    // never silently hidden, and status line 3 must never claim
+    // "complete" for a run that actually failed. Reuses the existing,
+    // already-fully-localized 'discovery.statusStopped' copy rather than
+    // adding a new i18n key for this rare, defensive-only state.
+    var isDone = discovery.status === 'discovery_stopped' || discovery.status === 'discovery_complete' || discovery.status === 'error';
     var hasSelection = !!discovery.processingSelection;
 
     if (els.discoveryStatusLine1) {
@@ -2512,7 +2521,7 @@
       if (!hasSelection) {
         els.discoveryStatusLine3.textContent = isDiscovering
           ? WSI18n.t('discovery.statusDiscovering')
-          : (discovery.status === 'discovery_stopped' ? WSI18n.t('discovery.statusStopped') : WSI18n.t('discovery.statusComplete'));
+          : ((discovery.status === 'discovery_stopped' || discovery.status === 'error') ? WSI18n.t('discovery.statusStopped') : WSI18n.t('discovery.statusComplete'));
       }
     }
 
