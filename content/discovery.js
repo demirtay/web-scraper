@@ -153,12 +153,12 @@
         });
       } catch (e) { /* best-effort — never blocks collection */ }
     }
-    var merge = root.WSRunState.mergeNewRows(session, accepted, session.scraperConfig.columns);
+    var merge = root.WSRunState.mergeNewRows(session, accepted, session.scraperConfig.columns, { baseUrl: location.href });
     session = merge.runState;
     session.lastPassNewRows = merge.newUniqueCount;
     session.lastCheckAt = Date.now();
     session.updatedAt = Date.now();
-    return { session: session, accepted: accepted, newUniqueCount: merge.newUniqueCount };
+    return { session: session, accepted: accepted, newUniqueCount: merge.newUniqueCount, rawCount: candidateRows.length };
   }
 
   /** Seeds the two internally-owned engine sub-objects THIS file drives
@@ -362,8 +362,6 @@
         // baseline carried over from the page before it.
         if (firstIteration && !skipInitialScrape) session.discovery.currentPageBaselineCandidateCount = 0;
 
-        var beforeUnique = session.rows.length;
-        var beforeCandidates = session.discovery.currentPageBaselineCandidateCount;
         var passResult;
         try {
           passResult = scrapeCurrentPage(session);
@@ -373,7 +371,13 @@
         }
         session = passResult.session;
         var afterCandidates = candidateCount(cs);
-        session.discovery = root.WSDiscoveryCore.recordExpansionDelta(session.discovery, beforeCandidates, afterCandidates, beforeUnique, session.rows.length);
+        // Precise variant here (not recordExpansionDelta) — this is the
+        // ONE point in the loop where the real classification outcome
+        // (raw DOM matches -> accepted -> genuinely new) is directly
+        // available, correctly separating "invalid/excluded" from
+        // "duplicate" instead of conflating them (mission section 9's
+        // own two separate counters).
+        session.discovery = root.WSDiscoveryCore.recordScrapePassOutcome(session.discovery, passResult.rawCount, passResult.accepted.length, passResult.newUniqueCount, session.rows.length, afterCandidates);
 
         // Content-only loop/state check (mission section 21) — combines
         // URL + content fingerprint + unique count, same

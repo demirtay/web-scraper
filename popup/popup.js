@@ -177,6 +177,23 @@
     autoPaginateStatus: document.getElementById('auto-paginate-status'),
     durdurBtn: document.getElementById('durdur-btn'),
 
+    // AUTOMATIC DISCOVERY STATUS + PROCESSING CHOICE (data-integrity/UX mission)
+    discoveryPanel: document.getElementById('discovery-panel'),
+    discoveryStatusLine1: document.getElementById('discovery-status-line1'),
+    discoveryStatusLine2: document.getElementById('discovery-status-line2'),
+    discoveryStatusLine3: document.getElementById('discovery-status-line3'),
+    discoveryChoicePanel: document.getElementById('discovery-choice-panel'),
+    discoveryChoiceHeading: document.getElementById('discovery-choice-heading'),
+    discoveryProcessAllBtn: document.getElementById('discovery-process-all-btn'),
+    discoveryFirstNInput: document.getElementById('discovery-first-n-input'),
+    discoveryProcessFirstBtn: document.getElementById('discovery-process-first-btn'),
+    discoveryChoiceError: document.getElementById('discovery-choice-error'),
+    discoverySummaryPanel: document.getElementById('discovery-summary-panel'),
+    discoverySummaryFound: document.getElementById('discovery-summary-found'),
+    discoverySummaryProcessed: document.getElementById('discovery-summary-processed'),
+    discoverySummaryDuplicates: document.getElementById('discovery-summary-duplicates'),
+    discoverySummaryInvalid: document.getElementById('discovery-summary-invalid'),
+
     // NEW FEATURE — INFINITE SCROLL (Auto Scroll)
     autoScrollToggle: document.getElementById('auto-scroll-toggle'),
     autoScrollStatus: document.getElementById('auto-scroll-status'),
@@ -2187,7 +2204,7 @@
       // pass — guarantees identical identity logic for this first batch
       // and every batch appended after it.
       var datasetBefore = session.rows.length;
-      var seedMerge = WSRunState.mergeNewRows(session, rawRows, state.columns);
+      var seedMerge = WSRunState.mergeNewRows(session, rawRows, state.columns, { baseUrl: pageUrl });
       session = seedMerge.runState;
       // Diagnostics (dev-only "Copy Session Diagnostic" reads this) —
       // never trust a count just because extraction completed: the exact
@@ -2440,6 +2457,127 @@
     // bitirBtn/shows exportGate above, and DURDUR would be meaningless
     // once the dataset is frozen.
     if (els.durdurBtn) els.durdurBtn.hidden = !((apRunning || asRunning || discovering) && activeLiveSession.status === 'active');
+
+    renderDiscoveryUI();
+  }
+
+  /** AUTOMATIC DISCOVERY STATUS + PROCESSING CHOICE UI (data-integrity/UX
+   * mission, sections 8-9/14): the single user-facing surface for the
+   * automatic discovery engine. Never mentions pagination/scroll/load-more
+   * by name (mission section 14 — "communicate WHAT, not HOW"). Reads
+   * purely from activeLiveSession.discovery, which content/discovery.js
+   * and utils/discovery.js already populate/keep current; this function
+   * only ever displays state, it never mutates it (mutation happens in
+   * processAll()/processFirst() below, triggered by the two buttons this
+   * function wires up once).
+   *
+   * Three mutually-exclusive phases, driven by discovery.status:
+   *   - 'discovering'                      -> live status lines only
+   *   - 'discovery_stopped'/'_complete'    -> live status lines + choice
+   *                                            panel (ALL / FIRST N), IF
+   *                                            processingSelection not
+   *                                            made yet
+   *   - processingSelection already set    -> summary panel (found /
+   *     (i.e. status 'processing_complete')   processed / duplicates /
+   *                                            invalid), choice panel
+   *                                            hidden
+   * No discovery object at all (pre-mission session, or a session that
+   * never used automatic discovery) -> the whole panel stays hidden,
+   * identical to before this feature existed. */
+  function renderDiscoveryUI() {
+    if (!els.discoveryPanel) return;
+    var discovery = activeLiveSession && activeLiveSession.discovery;
+    if (!discovery) {
+      els.discoveryPanel.hidden = true;
+      return;
+    }
+    els.discoveryPanel.hidden = false;
+
+    var isDiscovering = discovery.status === 'discovering';
+    var isDone = discovery.status === 'discovery_stopped' || discovery.status === 'discovery_complete';
+    var hasSelection = !!discovery.processingSelection;
+
+    if (els.discoveryStatusLine1) {
+      els.discoveryStatusLine1.textContent = WSI18n.t('discovery.uniqueDiscovered', { count: discovery.discoveredUnique || 0 });
+    }
+    if (els.discoveryStatusLine2) {
+      els.discoveryStatusLine2.textContent = WSI18n.t('discovery.pagesScanned', { count: discovery.pagesVisited || 1 });
+    }
+    if (els.discoveryStatusLine3) {
+      // Hide the status-line3 sentence entirely once a processing
+      // selection exists — the summary panel below takes over saying
+      // what happened, and showing both is redundant clutter (mission
+      // section 9: "do not clutter the UI").
+      els.discoveryStatusLine3.hidden = hasSelection;
+      if (!hasSelection) {
+        els.discoveryStatusLine3.textContent = isDiscovering
+          ? WSI18n.t('discovery.statusDiscovering')
+          : (discovery.status === 'discovery_stopped' ? WSI18n.t('discovery.statusStopped') : WSI18n.t('discovery.statusComplete'));
+      }
+    }
+
+    // Choice panel: only once discovery has actually stopped/completed,
+    // and only until a selection has been made.
+    var showChoice = isDone && !hasSelection;
+    if (els.discoveryChoicePanel) els.discoveryChoicePanel.hidden = !showChoice;
+    if (showChoice) {
+      if (els.discoveryChoiceHeading) els.discoveryChoiceHeading.textContent = WSI18n.t('discovery.howManyToProcess');
+      if (els.discoveryProcessAllBtn) els.discoveryProcessAllBtn.textContent = WSI18n.t('discovery.processAllBtn', { count: discovery.discoveredUnique || 0 });
+      if (els.discoveryFirstNInput) {
+        els.discoveryFirstNInput.max = String(discovery.discoveredUnique || 0);
+        // This project's other free-text inputs all use a plain hardcoded
+        // English `placeholder` attribute (no i18n) — this one instead
+        // goes through the real WSI18n.t() the same way every other
+        // dynamic string on this panel does, since it already has a
+        // translated `discovery.firstNPlaceholder` key with 100% locale
+        // coverage (see utils/i18n-data.js) and setting it here (rather
+        // than a static HTML attribute) keeps it correctly localized if
+        // the user ever switches locale mid-session.
+        els.discoveryFirstNInput.placeholder = WSI18n.t('discovery.firstNPlaceholder');
+      }
+    }
+
+    // Summary panel: only once a selection has actually been applied.
+    if (els.discoverySummaryPanel) els.discoverySummaryPanel.hidden = !hasSelection;
+    if (hasSelection) {
+      var sel = discovery.processingSelection;
+      if (els.discoverySummaryFound) els.discoverySummaryFound.textContent = WSI18n.t('discovery.uniqueDiscovered', { count: discovery.discoveredUnique || 0 });
+      if (els.discoverySummaryProcessed) els.discoverySummaryProcessed.textContent = WSI18n.t('discovery.summaryProcessed', { count: sel.processedCount || 0 });
+      if (els.discoverySummaryDuplicates) els.discoverySummaryDuplicates.textContent = WSI18n.t('discovery.summaryDuplicates', { count: discovery.duplicateEncounters || 0 });
+      if (els.discoverySummaryInvalid) els.discoverySummaryInvalid.textContent = WSI18n.t('discovery.summaryInvalid', { count: discovery.invalidSkipped || 0 });
+    }
+  }
+
+  /** Click handler for the "ALL — {count}" button in the discovery choice
+   * panel. Delegates to the real processAll() (same function the test-only
+   * seam above calls), then re-renders to swap the choice panel for the
+   * summary panel. */
+  function handleDiscoveryProcessAll() {
+    processAll();
+    renderDiscoveryUI();
+  }
+
+  /** Click handler for "FIRST [n] Process" in the discovery choice panel.
+   * Validates via the real processFirst(n) (which itself delegates to
+   * WSDiscoveryCore.validateSelection — the same pure validation logic
+   * used everywhere else), surfacing a translated inline error rather than
+   * silently doing nothing on bad input (mission section 50: 0, -5, 2.5,
+   * "abc", oversized N). */
+  function handleDiscoveryProcessFirst() {
+    if (!els.discoveryFirstNInput) return;
+    var raw = els.discoveryFirstNInput.value;
+    var n = parseInt(raw, 10);
+    var result = processFirst(n);
+    if (!result || !result.ok) {
+      if (els.discoveryChoiceError) {
+        var discovery = activeLiveSession && activeLiveSession.discovery;
+        els.discoveryChoiceError.textContent = WSI18n.t('discovery.invalidFirstN', { max: (discovery && discovery.discoveredUnique) || 0 });
+        els.discoveryChoiceError.hidden = false;
+      }
+      return;
+    }
+    if (els.discoveryChoiceError) els.discoveryChoiceError.hidden = true;
+    renderDiscoveryUI();
   }
 
   /** Mirrors attachRunStorageListener's exact existing pattern: a live
@@ -8130,6 +8268,8 @@
     if (els.baslaBtn) els.baslaBtn.addEventListener('click', handleStartLiveSession);
     if (els.bitirBtn) els.bitirBtn.addEventListener('click', handleFinishLiveSession);
     if (els.durdurBtn) els.durdurBtn.addEventListener('click', handleStopAutoPaginate);
+    if (els.discoveryProcessAllBtn) els.discoveryProcessAllBtn.addEventListener('click', handleDiscoveryProcessAll);
+    if (els.discoveryProcessFirstBtn) els.discoveryProcessFirstBtn.addEventListener('click', handleDiscoveryProcessFirst);
 
     els.toggleFilterBtn.addEventListener('click', toggleFilterPanel);
     els.toggleSortBtn.addEventListener('click', toggleSortPanel);

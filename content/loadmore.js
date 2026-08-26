@@ -252,7 +252,7 @@
         });
       } catch (e) { /* best-effort — never blocks collection */ }
     }
-    var merge = root.WSRunState.mergeNewRows(session, accepted, session.scraperConfig.columns);
+    var merge = root.WSRunState.mergeNewRows(session, accepted, session.scraperConfig.columns, { baseUrl: location.href });
     session = merge.runState;
     session.lastPassNewRows = merge.newUniqueCount;
     session.lastCheckAt = Date.now();

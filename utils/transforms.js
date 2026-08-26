@@ -497,7 +497,22 @@
 
   // Generic, well-known tracking parameters only — deliberately NOT a
   // catch-all (spec #14: never strips an arbitrary/unrecognized param).
-  var TRACKING_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid', 'msclkid'];
+  // Kept in sync by hand with utils/runstate.js's own identically-named
+  // IDENTITY_TRACKING_PARAMS list (that file's own dedupe-identity
+  // canonicalization uses this exact same set) — a local copy, not a
+  // cross-file reference, since this file isn't loaded in every context
+  // that one is (see that file's own comment for why). Extended (data-
+  // integrity mission) to also cover Etsy's own `ref`/`click_key`/
+  // `click_sum` tracking parameters, the concrete real-world case that
+  // originally motivated this list.
+  var TRACKING_PARAMS = [
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+    'gclid', 'fbclid', 'msclkid', 'mc_cid', 'mc_eid',
+    'ref', 'ref_src', 'ref_url', 'ref_page', 'ref_sr', 'referrer',
+    'click_key', 'click_sum',
+    'campaign_id', 'campaignid', 'aff_id', 'affiliate_id',
+    'spm', 'igshid', 'yclid', 'dclid', '_ga', '_gl'
+  ];
 
   function removeTrackingParams(v, context) {
     if (v == null) return v;

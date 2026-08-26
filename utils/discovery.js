@@ -66,6 +66,17 @@
       status: 'discovering',
       discoveredUnique: 0,
       duplicateEncounters: 0,
+      // Rows whose CONTAINER matched the repeating-card selector but were
+      // rejected by the existing ad/promo/nav/malformed-row classifier
+      // (WSAutoDetect.classifyExtractedRows, unmodified — reused exactly
+      // as every other collection path already does) before ever
+      // reaching the dedupe step. Precisely tracked only during content/
+      // discovery.js's own explicit per-page scrape (see
+      // recordScrapePassOutcome below) — a documented, honest scope
+      // limit: rows the reused Auto Scroll/Load More engines' own opaque
+      // internal cycles individually exclude are still correctly kept
+      // OUT of discoveredUnique, just not separately counted here.
+      invalidSkipped: 0,
       pagesVisited: 1,
       scrollCycles: 0,
       loadMoreActions: 0,
@@ -126,6 +137,30 @@
     var uniqueDelta = Math.max(0, (afterUnique || 0) - (beforeUnique || 0));
     var duplicatesThisPhase = Math.max(0, candidateDelta - uniqueDelta);
     discovery.duplicateEncounters += duplicatesThisPhase;
+    discovery.discoveredUnique = afterUnique;
+    discovery.currentPageBaselineCandidateCount = afterCandidateCount || 0;
+    discovery.updatedAt = now();
+    return discovery;
+  }
+
+  /**
+   * Precise sibling of recordExpansionDelta above, used ONLY where the
+   * real classification outcome is directly available — i.e., content/
+   * discovery.js's own explicit per-page scrape, which sees the genuine
+   * raw-DOM-match count, the post-classification accepted count, AND the
+   * post-dedupe genuinely-new count as three separate real numbers, not
+   * an inferred delta. Correctly splits mission section 9's two distinct
+   * counters instead of conflating them the way the coarser
+   * candidate-count delta necessarily does: a row that never passed
+   * classification (an ad/promo/malformed match) is genuinely different
+   * from a row that passed classification but turned out to duplicate an
+   * already-discovered record.
+   */
+  function recordScrapePassOutcome(discovery, rawCount, acceptedCount, newUniqueCount, afterUnique, afterCandidateCount) {
+    var excluded = Math.max(0, (rawCount || 0) - (acceptedCount || 0));
+    var duplicates = Math.max(0, (acceptedCount || 0) - (newUniqueCount || 0));
+    discovery.invalidSkipped += excluded;
+    discovery.duplicateEncounters += duplicates;
     discovery.discoveredUnique = afterUnique;
     discovery.currentPageBaselineCandidateCount = afterCandidateCount || 0;
     discovery.updatedAt = now();
@@ -230,6 +265,7 @@
     DEFAULT_MAX_TOTAL_CYCLES: DEFAULT_MAX_TOTAL_CYCLES,
     createDiscoveryState: createDiscoveryState,
     recordExpansionDelta: recordExpansionDelta,
+    recordScrapePassOutcome: recordScrapePassOutcome,
     onPageAdvance: onPageAdvance,
     buildTraversalStateId: buildTraversalStateId,
     registerVisitedState: registerVisitedState,

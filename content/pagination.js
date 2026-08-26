@@ -111,7 +111,7 @@
       runState = fresh;
 
       var extraction = WSScraper.runExtraction(runState.scraperConfig);
-      var mergeResult = WSRunState.mergeNewRows(runState, extraction.rows, runState.scraperConfig.columns);
+      var mergeResult = WSRunState.mergeNewRows(runState, extraction.rows, runState.scraperConfig.columns, { baseUrl: location.href });
       runState = mergeResult.runState;
       runState.progress.lastPassNewRows = mergeResult.newUniqueCount;
       runState.progress.noNewDataStreak = mergeResult.newUniqueCount > 0 ? 0 : runState.progress.noNewDataStreak + 1;
@@ -272,7 +272,7 @@
       if (waitResult.reason === 'aborted') return;
 
       var extraction = WSScraper.runExtraction(runState.scraperConfig);
-      var mergeResult = WSRunState.mergeNewRows(runState, extraction.rows, runState.scraperConfig.columns);
+      var mergeResult = WSRunState.mergeNewRows(runState, extraction.rows, runState.scraperConfig.columns, { baseUrl: location.href });
       runState = mergeResult.runState;
       runState.progress.lastPassNewRows = mergeResult.newUniqueCount;
 
@@ -394,7 +394,7 @@
       runState = fresh;
 
       var extraction = WSScraper.runExtraction(runState.scraperConfig);
-      var mergeResult = WSRunState.mergeNewRows(runState, extraction.rows, runState.scraperConfig.columns);
+      var mergeResult = WSRunState.mergeNewRows(runState, extraction.rows, runState.scraperConfig.columns, { baseUrl: location.href });
       runState = mergeResult.runState;
       runState.progress.lastPassNewRows = mergeResult.newUniqueCount;
       runState.progress.noNewDataStreak = mergeResult.newUniqueCount > 0 ? 0 : runState.progress.noNewDataStreak + 1;

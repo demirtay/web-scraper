@@ -527,6 +527,118 @@
     return avgLen >= DESCRIPTION_MIN_AVG_LEN;
   }
 
+  // =====================================================================
+  // TITLE QUALITY (data-integrity mission, sections 5/6): a real-world
+  // failure showed automatic Title detection sometimes returning an
+  // ENTIRE product card's textContent — title + rating + review count +
+  // "Star Seller" + sale price + old price + discount + seller/shipping
+  // text all concatenated — because the card's own primary link (<a>)
+  // wraps ALL of that as one clickable unit, and this file's own anchor-
+  // text candidate previously always used that whole anchor's textContent
+  // verbatim. The fix is architectural (find and select the ACTUAL title
+  // element within the anchor), never text-editing/stripping the bad
+  // blob after the fact (mission section 6: "prefer selecting the correct
+  // DOM element over aggressively cleaning a bad giant text blob" — this
+  // project's own established principle already applied to every other
+  // cleaner in utils/cleaners.js: never fabricate/mangle, only choose or
+  // decline).
+  // =====================================================================
+
+  // Embedded (not necessarily exact-match) signals that a text blob mixes
+  // in card metadata beyond the title itself — deliberately checked as
+  // SUBSTRINGS within a longer string, unlike PRICE_RE/RATING_RE/COUNT_RE
+  // above (which classify a field whose ENTIRE value IS that signal).
+  // Bilingual (EN + TR), matching this project's own established scope
+  // for generic, non-marketplace-specific text heuristics.
+  var EMBEDDED_RATING_RE = /\b\d(?:[.,]\d)?\s*(?:out of|\/)\s*5\b/i;
+  var EMBEDDED_REVIEW_COUNT_RE = /\(?\b[\d.,]+[kKmM]?\+?\)?\s*(?:reviews?|ratings?|sold|satış|değerlendirme|yorum)\b/i;
+  var SELLER_BADGE_RE = /\bstar\s*seller\b|\bbestseller\b|\btop\s*rated\b|\bçok\s*satan\b|\bvitrin\s*mağaza\b/i;
+  var SHIPPING_LABEL_RE = /\bfree\s+shipping\b|\bships?\s+from\b|\bücretsiz\s+kargo\b|\bkargo\s+bedava\b/i;
+  var DISCOUNT_LABEL_RE = /\b\d{1,3}\s*%\s*(?:off|indirim)\b/i;
+  var AD_LABEL_RE = /\b(?:sponsored|advertisement|reklam)\b/i;
+
+  /** Counts price-shaped substrings embedded anywhere in a longer text
+   * blob (a global-flag copy of the existing exact-match PRICE_RE) — two
+   * or more is a strong "this is a card blob, not a title" signal on its
+   * own (mission's own explicit example: "duplicated price information
+   * inside many Title values"). */
+  function countEmbeddedPrices(text) {
+    var re = new RegExp(PRICE_RE.source, 'gi');
+    return (text.match(re) || []).length;
+  }
+
+  /**
+   * True when `text` clearly mixes unrelated card metadata into what
+   * should be a clean title — never used to EDIT text, only to decide
+   * whether to search for a more specific DOM element instead (see
+   * findBestTitleDescendant below). A real title merely CONTAINING a
+   * number or a word that resembles one of these patterns in isolation
+   * is never enough on its own to trip this (mission: "Do NOT remove
+   * legitimate words from real product titles merely because they
+   * resemble metadata") — every signal here requires either a repeated/
+   * multiple-price shape or a recognizable, distinctly-labeled metadata
+   * phrase (star seller, free shipping, N% off, etc.), not a bare number.
+   */
+  function looksLikeTitleContaminated(text) {
+    if (!text) return false;
+    if (countEmbeddedPrices(text) >= 2) return true;
+    if (EMBEDDED_RATING_RE.test(text)) return true;
+    if (EMBEDDED_REVIEW_COUNT_RE.test(text)) return true;
+    if (SELLER_BADGE_RE.test(text)) return true;
+    if (SHIPPING_LABEL_RE.test(text)) return true;
+    if (DISCOUNT_LABEL_RE.test(text)) return true;
+    if (AD_LABEL_RE.test(text)) return true;
+    return false;
+  }
+
+  // Semantic signals for "this element IS a title", checked in DOM order
+  // (querySelectorAll's natural document order) — generic across sites,
+  // never a single site's own specific class names as the ONLY mechanism
+  // (mission section 5: "the title extraction system must be generic...
+  // site-specific heuristics may supplement the generic system but must
+  // not replace it").
+  var TITLE_ELEMENT_SELECTOR = 'h1,h2,h3,h4,h5,h6,[itemprop="name"],' +
+    '[class*="title" i],[class*="Title" i],[class*="-name" i],[class*="_name" i],' +
+    '[data-testid*="title" i],[data-testid*="name" i]';
+
+  /**
+   * Searches WITHIN `rootEl` (typically the card's own primary link) for
+   * the single best title-like descendant — never the whole subtree's
+   * combined text, always one specific element's own text. Returns null
+   * (caller then falls back to the original, unmodified behavior — never
+   * a regression) when nothing clean and title-shaped is found.
+   */
+  function findBestTitleDescendant(rootEl) {
+    if (!rootEl || !rootEl.querySelectorAll) return null;
+    var candidateEls;
+    try { candidateEls = rootEl.querySelectorAll(TITLE_ELEMENT_SELECTOR); } catch (e) { candidateEls = []; }
+    var best = null, bestScore = -1;
+    Array.prototype.forEach.call(candidateEls, function (el) {
+      var text = normText(el.textContent);
+      if (!text) return;
+      // Never select a descendant that is ITSELF still contaminated, or
+      // that is actually a price/rating/count field wearing a heading tag
+      // (a real, observed card pattern) — a title candidate must be
+      // genuinely clean, not just "closer" to clean than the whole card.
+      if (looksLikeTitleContaminated(text)) return;
+      if (PRICE_RE.test(text) || RATING_RE.test(text) || COUNT_RE.test(text)) return;
+      var score = 0;
+      var tag = (el.tagName || '').toLowerCase();
+      if (/^h[1-6]$/.test(tag)) score += 60 - (parseInt(tag.charAt(1), 10) * 3); // h1 strongest, h6 weakest, but any heading beats a class-name guess
+      if (el.getAttribute && el.getAttribute('itemprop') === 'name') score += 55;
+      var cls = (el.className && el.className.baseVal) || el.className || '';
+      if (/title|name/i.test(String(cls))) score += 25;
+      var testId = el.getAttribute ? (el.getAttribute('data-testid') || '') : '';
+      if (/title|name/i.test(testId)) score += 20;
+      // Longer (up to a point) reads as more title-like than a two-word
+      // fragment, but never rewards runaway length — that's exactly the
+      // "whole card blob" failure mode this function exists to avoid.
+      score += Math.min(text.length, 80) / 4;
+      if (score > bestScore) { bestScore = score; best = el; }
+    });
+    return best;
+  }
+
   function buildFieldCandidate(containerScope, leafEl, allInstances) {
     var relSelector = Sel.buildRelativeSelector(containerScope, leafEl);
     if (!relSelector) return null;
@@ -636,10 +748,55 @@
       seenSelectors[fc.relativeSelector] = true;
 
       if (fc.isAnchor) {
-        // Text interpretation of the anchor (e.g. a title link).
-        var textFc = Object.assign({}, fc, { attribute: 'text' });
-        var textVal = Sel.extractValue(el, 'text');
-        if (textVal) candidates.push(textFc);
+        // Text interpretation of the anchor (e.g. a title link). REAL
+        // BUG fixed here (data-integrity mission): on a card whose
+        // primary link wraps the ENTIRE card (title + rating + review
+        // count + badges + price + shipping, all inside one <a>), using
+        // this anchor's own full textContent verbatim produced exactly
+        // the reported failure — a "Title" value containing all of that.
+        // Fixed by searching for the actual title element INSIDE the
+        // anchor first (see findBestTitleDescendant's own header comment
+        // for why this is a DOM-selection fix, never a text-stripping
+        // one) — only falls back to the anchor's own full text when the
+        // anchor's text isn't contaminated to begin with, or no cleaner
+        // descendant exists (never a regression from prior behavior).
+        var anchorText = normText(el.textContent);
+        var titleLeaf = el;
+        if (looksLikeTitleContaminated(anchorText)) {
+          var betterTitleEl = findBestTitleDescendant(el);
+          if (betterTitleEl) titleLeaf = betterTitleEl;
+        }
+        var textFc, textVal;
+        if (titleLeaf === el) {
+          textFc = Object.assign({}, fc, { attribute: 'text' });
+          textVal = Sel.extractValue(el, 'text');
+        } else {
+          // A genuinely different, more specific element — build its own
+          // real candidate (own relativeSelector, own per-instance
+          // samples/coverage/uniqueness) via the same generic pipeline
+          // every other field candidate uses, never a hand-rolled stand-in.
+          // Guarded against seenSelectors the same way the innerImg case
+          // below already is — collectLeafCandidates() never descends
+          // into an anchor on its own, so this can't collide with an
+          // independently-discovered leaf, but the guard costs nothing
+          // and keeps this consistent with that established pattern.
+          var titleRel = Sel.buildRelativeSelector(containerInstance, titleLeaf);
+          if (titleRel && !seenSelectors[titleRel]) {
+            seenSelectors[titleRel] = true;
+            textFc = buildFieldCandidate(containerInstance, titleLeaf, allInstances);
+          }
+          textVal = textFc ? (textFc.samples[0] || '') : '';
+          if (!textFc || !textVal) {
+            // The narrower element didn't actually resolve to a usable
+            // value across the sample (e.g. it only exists on this one
+            // instance) — fall back to the original anchor-text behavior
+            // rather than silently dropping the Title field entirely.
+            titleLeaf = el;
+            textFc = Object.assign({}, fc, { attribute: 'text' });
+            textVal = Sel.extractValue(el, 'text');
+          }
+        }
+        if (textVal && textFc) candidates.push(textFc);
         // Only the PRIMARY link on the card also gets an href candidate —
         // avoids proposing a separate "Link" column per anchor on cards
         // with several links.

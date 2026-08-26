@@ -89,20 +89,20 @@
           <table id="setup-preview-table"></table>
         </div>
 
-        <!-- NEW FEATURE — AUTOMATIC PAGINATION (Auto Next). OFF by
-             default (spec). Read once, at BAŞLA click time, by
-             popup.js's handleStartLiveSession — never touched again
-             mid-session, so its checked state can't drift out of sync
-             with a session already in progress. Purely additive: when
-             left unchecked, the session gets no `autoPaginate` field at
-             all and every existing BAŞLA/BİTİR code path is unchanged. -->
-        <!-- NEW FEATURE — INFINITE SCROLL (Auto Scroll). Same read-once-
-             at-BAŞLA, purely-additive contract as Auto Next above — when
-             left unchecked, the session gets no `autoScroll` field at
-             all and every existing code path (including Auto Next's
-             own) is unchanged. Placed in the same checkbox row as Auto
-             Next per spec: "place Auto Scroll near it in a clean way." -->
-        <div class="ws-checkbox-row">
+        <!-- AUTOMATIC DISCOVERY ENGINE mission (UI cleanup, section 14):
+             these two controls are implementation details the normal user
+             should never need to understand or choose (mission section 1:
+             "The user should NOT have to understand how a website loads
+             additional data") — content/discovery.js now ALWAYS decides
+             pagination vs. infinite scroll vs. Load More vs. a hybrid
+             automatically, every time, unconditionally (see popup.js's
+             handleStartLiveSession — their `.checked` state is no longer
+             read at all). Hidden here rather than deleted, exactly per
+             CLAUDE.md's own "do not remove/delete underlying capabilities
+             or controls prematurely" — the checkboxes and their labels
+             stay in the DOM, inert, so a later mission can restore or
+             finally remove this markup without having to reconstruct it. -->
+        <div class="ws-checkbox-row" hidden>
           <label><input type="checkbox" id="auto-next-toggle" /> <span data-i18n="liveSession.autoNextLabel">Auto Next</span></label>
           <label><input type="checkbox" id="auto-scroll-toggle" /> <span data-i18n="liveSession.autoScrollLabel">Auto Scroll</span></label>
         </div>
@@ -496,6 +496,48 @@
                popup"; "If Auto Next already exists..."), which now stops
                whichever of the two (or both) is currently running. -->
           <p id="auto-scroll-status" class="ws-note ws-workflow-status" hidden></p>
+
+          <!-- ============ AUTOMATIC DISCOVERY STATUS + PROCESSING CHOICE ============
+               Data-integrity/UX mission: the ONLY thing a normal user sees
+               about traversal is "how many unique records have been found
+               so far" and "how many pages scanned" — never Next/Scroll/
+               Load More terminology (mission's own explicit requirement).
+               Populated/shown entirely by popup.js's renderDiscoveryUI(),
+               driven by activeLiveSession.discovery (see content/
+               discovery.js) — a session created by any BAŞLA click always
+               has this field now, so this panel is the normal, default
+               experience, not an opt-in extra. -->
+          <div id="discovery-panel" hidden>
+            <p id="discovery-status-line1" class="ws-note ws-workflow-status"></p>
+            <p id="discovery-status-line2" class="ws-note ws-workflow-status"></p>
+            <p id="discovery-status-line3" class="ws-note ws-workflow-status"></p>
+
+            <!-- Shown once discovery has stopped/completed and no
+                 processing selection has been made yet (mission section
+                 8: "How many should be processed? [ALL] [FIRST ___]"). -->
+            <div id="discovery-choice-panel" hidden>
+              <p id="discovery-choice-heading" class="ws-note" style="font-weight:600;"></p>
+              <div class="ws-actions-row">
+                <button type="button" id="discovery-process-all-btn" class="ws-btn ws-btn-primary"></button>
+              </div>
+              <div class="ws-checkbox-row" style="margin-top:6px;">
+                <label for="discovery-first-n-input" data-i18n="discovery.firstLabel">FIRST</label>
+                <input type="number" id="discovery-first-n-input" min="1" step="1" style="width:100px;" />
+                <button type="button" id="discovery-process-first-btn" class="ws-btn ws-btn-secondary" data-i18n="discovery.processFirstBtn">Process</button>
+              </div>
+              <p id="discovery-choice-error" class="ws-note" style="color:#b91c1c;" hidden></p>
+            </div>
+
+            <!-- Shown once a processing selection has actually been made
+                 (mission section 9's own final-count list). -->
+            <div id="discovery-summary-panel" hidden>
+              <p id="discovery-summary-found" class="ws-note"></p>
+              <p id="discovery-summary-processed" class="ws-note"></p>
+              <p id="discovery-summary-duplicates" class="ws-note"></p>
+              <p id="discovery-summary-invalid" class="ws-note"></p>
+            </div>
+          </div>
+
           <button id="durdur-btn" class="ws-btn ws-btn-secondary ws-btn-block" hidden data-i18n="liveSession.durdur">DURDUR</button>
           <button id="bitir-btn" class="ws-btn ws-btn-primary ws-btn-block" hidden data-i18n="liveSession.bitir">BİTİR</button>
 

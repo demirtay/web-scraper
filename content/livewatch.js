@@ -259,7 +259,7 @@
       // rows (runState.rows.concat(added)) — structurally an append,
       // never a replace. operation is logged as 'APPEND' unconditionally
       // for a completed rescan so this is verifiable, not assumed.
-      var merge = root.WSRunState.mergeNewRows(session, accepted, session.scraperConfig.columns);
+      var merge = root.WSRunState.mergeNewRows(session, accepted, session.scraperConfig.columns, { baseUrl: location.href });
       session = merge.runState;
       session.lastPassNewRows = merge.newUniqueCount;
       session.lastCheckAt = Date.now();

@@ -2,486 +2,254 @@
 
 **Status: COMPLETE**
 
-Implement, harden, and real-browser-verify an AUTOMATIC DATA DISCOVERY
-ENGINE for ClickScrape: the user configures columns, then ClickScrape
-automatically discovers every accessible unique record through the
-current result/listing flow — deciding entirely on its own whether more
-records are reached via pagination, infinite scroll, Load More, or a
-hybrid — reports an honest "N records found", and only THEN lets the
-user choose ALL or FIRST N to process into the final dataset. Discovery
-and Processing are architecturally separate. Existing engines (Auto Next,
-Auto Scroll) are reused as internal capabilities, not rewritten.
+DATA INTEGRITY + FULLY AUTOMATIC DISCOVERY CLEANUP: (1) hide the manual
+Auto Next/Auto Scroll checkboxes from normal users — BAŞLA is the single
+trigger, automatic discovery (already built in the prior mission) decides
+pagination/scroll/Load More entirely on its own; (2) fix duplicate
+detection so tracking-parameter variants of the same product (the
+real-world Etsy failure: `?ref=`/`click_key=`/`click_sum=` etc.) collapse
+to ONE canonical record, both during discovery and at export; (3) fix
+Title extraction so it prefers the actual title element inside a
+repeating card instead of the whole card's contaminated textContent
+(price/rating/review-count/seller-badge/shipping/discount/ad text mixed
+in); (4) add a discovery-status + ALL/FIRST-N processing-choice UI panel;
+(5) verify CSV/JSON/XLSX export integrity by actually parsing the
+generated files, not just checking they don't throw.
 
-# Acceptance Criteria — Definition of Done
+# Acceptance Criteria — Definition of Done (mission's own Section 17, verbatim)
 
-- [x] Existing architecture inspected before writing anything
-- [x] `develop` confirmed synced with `origin/develop` at session start
-- [x] Discovery and Processing kept as separate concepts
-- [x] Automatic discovery orchestrator implemented (`content/discovery.js`)
-- [x] User no longer selects Next/Scroll mode (BAŞLA always starts
-      discovery; legacy toggles' checked state is no longer read)
-- [x] Existing Auto Pagination (`content/autopaginate.js`) reused/preserved, untouched
-- [x] Existing Infinite Scroll (`content/autoscroll.js`) reused/preserved — its
-      own `runUntilExhausted()` is called directly, unmodified logic
-- [x] Load More detection implemented safely (`content/loadmore.js`)
-- [x] Pagination discovered automatically
-- [x] Infinite Scroll discovered automatically
-- [x] Load More discovered automatically
-- [x] Hybrid traversal supported (scroll+pagination proven real; Load
-      More+pagination proven via fixture)
-- [x] Current page exhausted before premature Next
-- [x] Unique discovery registry persists (`session.rows`, reused mechanism)
-- [x] Canonical/stable dedupe works (reuses `WSRunState.mergeNewRows`)
-- [x] Stable discovery order works
-- [x] Virtualized DOM does not lose records
-- [x] Slow-load protection works (no premature finish)
-- [x] False Next protection works
-- [x] False Load More protection works
-- [x] Loop protection works
-- [x] Global completion logic works
-- [x] No fabricated totals
-- [x] No fabricated records
-- [x] Stop preserves partial discovery
-- [x] `processAll()` works
-- [x] `processFirst(n)` works
-- [x] Invalid N handled safely (0, -5, 2.5, "abc", NaN, over-large — never crashes, never fabricates)
-- [x] Data Cleaning remains compatible (untouched; regression-verified)
-- [x] Templates remain compatible (untouched; regression-verified)
-- [x] Session persistence remains compatible
-- [x] 10,000-record performance fixture passes
-- [x] Focused tests pass
-- [x] Full regression has no new related failures
-- [x] `release-check.js` passes
-- [x] Real paginated site tested automatically (books.toscrape.com)
-- [x] Real infinite-scroll site tested automatically (quotes.toscrape.com/scroll)
-- [x] At least 3 growth cycles verified where available (3 real pages; 3 real scroll cycles)
-- [x] Real FIRST-N processing verified (real, in-tab `WSDiscoveryCore` calls)
-- [x] Real ALL processing verified on a reasonable real dataset
-- [x] Screenshots/logs/result artifacts inspected (not just status text)
-- [x] `main` untouched
-- [x] `stable/v1.31.0` untouched
-- [x] Nothing committed
-- [x] Nothing pushed
+- [x] Automatic Next checkbox no longer required/visible to normal users
+- [x] Automatic Scroll checkbox no longer required/visible to normal users
+- [x] BAŞLA automatically launches discovery (already true from the prior
+      mission — reconfirmed unchanged this mission)
+- [x] Pagination automatically detected/traversed (reconfirmed, real browser)
+- [x] Infinite scroll automatically detected/traversed (reconfirmed, real browser)
+- [x] Load More automatically detected where applicable (reconfirmed via fixture suite)
+- [x] Discovery stops automatically at exhaustion (reconfirmed, fixture + real browser)
+- [x] Duplicate tracking URLs do not create duplicate products
+- [x] Etsy listing-ID canonicalization works
+- [x] Discovered count represents UNIQUE records
+- [x] Title detection prefers the real title element over the whole card
+- [x] Giant product-card text is not incorrectly exported as Title
+- [x] ALL processing works
+- [x] FIRST N processing works
+- [x] Stop works
+- [x] Finish works
+- [x] CSV/JSON/XLSX contents verified (actually parsed back, not just "didn't throw")
+- [x] Existing image functionality not broken (untouched this mission; release-check passes)
+- [x] Existing templates/configuration not broken (untouched this mission)
+- [x] Full regression suite has zero new failures
+- [x] Real-browser screenshots visually inspected (not just result.json read)
+- [x] Browser-process safety remains intact (regression check re-run, PASS)
 
-# ARCHITECTURE
+# Work Completed
 
-**Files changed:**
-- New: `utils/discovery.js`, `content/loadmore.js`, `content/discovery.js`,
-  `e2e/tests/discovery-pagination-real-site.test.js`,
-  `e2e/tests/discovery-scroll-real-site.test.js`.
-- Modified: `popup/popup.js` (BAŞLA/BİTİR/DURDUR wiring + Processing API),
-  `popup/popup.html` (+1 script tag), `background/background.js` /
-  `popup/popup.js` (`CONTENT_FILES` arrays), `content/autoscroll.js` (+1
-  coordination guard in its bootstrap), `content/livewatch.js` (+1
-  coordination guard in its passive watcher), `package.json` (+2 npm scripts).
+### 1. Canonical record identity / duplicate-detection fix
+`utils/runstate.js`: added `canonicalizeIdentityValue(rawValue, baseUrl)` +
+`IDENTITY_TRACKING_PARAMS` (26 known tracking/campaign params: utm_*,
+gclid/fbclid/msclkid, ref/ref_src/click_key/click_sum, aff_id, spm, etc.)
++ `KNOWN_ID_URL_PATTERNS` (Etsy `/listing/<id>/` → `etsy:<id>`, Amazon
+`/dp/<ASIN>/` → `amazon:<ASIN>`, eBay `/itm/<id>/` → `ebay:<id>`).
+`buildRowKey()`/`mergeNewRows()` now canonicalize the dedupe-key value
+before comparing, with a `context.baseUrl` parameter threaded through
+every real call site (`content/discovery.js`, `content/autoscroll.js`,
+`content/loadmore.js`, `content/livewatch.js`, `content/autopaginate.js`,
+`content/pagination.js` ×3, `popup/popup.js`). Falls back to generic
+tracking-param stripping + param-sorting + trailing-slash/host-case
+normalization for any URL that doesn't match a known ID pattern; a
+non-URL value falls back to raw-string comparison (never silently drops a
+row it can't parse). `utils/transforms.js`'s own `TRACKING_PARAMS` list
+(the "Remove Tracking Params" transform) was extended to match, for
+consistency between what gets deduped and what a user can manually strip.
 
-**Orchestrator design:** `content/discovery.js`'s per-page loop is: scrape
-→ Auto Scroll to exhaustion → Load More to exhaustion → find Next → click
-→ wait → repeat. It seeds and owns its own internal `session.autoScroll`/
-`session.loadMoreAuto` sub-objects — deliberately never the user-toggle-
-driven fields `content/autopaginate.js`'s/`content/autoscroll.js`'s own
-standalone message listeners respond to — so the existing explicit-toggle
-code paths (and their own real-browser tests) stay completely untouched
-and independently functional, while discovery always runs both engines
-automatically.
+### 2. Title-extraction contamination fix
+`content/autodetect.js`: added `looksLikeTitleContaminated(text)` (flags
+2+ embedded prices, rating fractions, review/rating counts, seller
+badges, shipping labels, discount percentages, ad labels — checked in 6
+languages matching this project's existing i18n locale set) and
+`findBestTitleDescendant(rootEl)` (scores heading tags, `itemprop="name"`,
+title/name-ish class names and `data-testid`s, and text length, rejecting
+any candidate that is itself contaminated or contains a price/rating/
+count). `detectFields()`'s anchor-title branch now only falls back to the
+whole anchor's raw text when it is NOT contaminated OR no clean
+descendant candidate exists — a DOM-selection fix, never a text-stripping
+one, so a legitimate title is never mangled to "fix" a false-positive
+metadata match.
 
-**Discovery vs. Processing:** Discovery accumulates the full, deduplicated,
-stably-ordered dataset directly into `session.rows` via the *existing*
-`WSRunState.mergeNewRows` mechanism — the exact same one BAŞLA/Auto
-Next/Auto Scroll always used. Processing (`processAll()`/`processFirst(n)`
-in `popup.js`) is therefore never a second extraction pass — it is purely
-"select ALL or the FIRST N of the already-fully-extracted registry, in
-stable discovery order" (pure logic in `utils/discovery.js`), then hand
-that selection to the completely unmodified existing pipeline
-(`rawRows` → `computeTransformedResult` → Data Cleaning → preview/export).
+### 3. Discovery counters: duplicates vs. invalid/empty separated
+`utils/discovery.js`: added `invalidSkipped` field + `recordScrapePassOutcome()`,
+which — for the one code path with real classification visibility
+(`content/discovery.js`'s own explicit per-page scrape) — separately
+tracks rows excluded by the row classifier (`invalidSkipped`) from rows
+that were valid but already-seen (`duplicateEncounters`). The reused Auto
+Scroll/Load-More engines' own opaque internal cycles keep the coarser,
+pre-existing conflated `recordExpansionDelta` counting — documented as an
+honest, narrow scope limit, not silently pretended away.
 
-**Reuse of Auto Pagination:** `content/nextdetect.js`'s `findNextControl()`
-used directly, unmodified — same false-positive protections (carousel/
-slider/modal/ad exclusion, container exclusion) as the existing Auto Next feature.
+### 4. UI cleanup — Auto Next/Auto Scroll hidden, discovery panel added
+`popup/popup.html`: the legacy `#auto-next-toggle`/`#auto-scroll-toggle`
+checkbox row is now `hidden` (never deleted — `handleStartLiveSession`
+already stopped reading their `.checked` state in the prior mission, so
+this purely removes a UI element normal users never needed). Added a new
+`#discovery-panel` (status lines, `#discovery-choice-panel` with an
+ALL/FIRST-N control pair, `#discovery-summary-panel` with found/
+processed/duplicates/invalid counts).
+`popup/popup.js`: added `renderDiscoveryUI()` (reads `activeLiveSession.
+discovery`, shows/hides the three sub-panels by `discovery.status` +
+whether a `processingSelection` exists yet, never mentions pagination/
+scroll/Load-More by name), wired into `renderLiveSessionUI()`; added
+`handleDiscoveryProcessAll()`/`handleDiscoveryProcessFirst()` click
+handlers (delegating to the pre-existing, unmodified `processAll()`/
+`processFirst(n)`), with inline, translated validation-error feedback for
+a bad FIRST-N input.
 
-**Reuse of Auto Scroll:** `content/autoscroll.js`'s `runUntilExhausted()`
-called directly, unmodified — the exact same function `content/
-autopaginate.js`'s own combined mode already called before this mission.
+### 5. i18n
+`utils/i18n-data.js`: 19 new keys × 6 locales (en/tr/de/fr/zh-CN/ru),
+`_one`/`_other` plural pairs where a count is involved. Verified 100%
+coverage via `WSI18n.coverageReport()` and via `scripts/release-check.js`'s
+own coverage gate.
 
-**Load More implementation:** `content/loadmore.js`, built to the identical
-`runUntilExhausted(session, host, controller, skipInitialScrape)` contract
-as Auto Scroll. Detection is page-wide (mirroring `content/nextdetect.js`'s
-own proven approach) — positive phrase match ("Load More"/"Show More"/
-"More Results"/"View More" + Turkish equivalents, allowing a trailing
-generic noun) AND rejection on any narrow-context negative word (review/
-description/comment/photo/detail/etc.), plus exclusion of per-card buttons
-and ad/carousel/modal wrappers. No standalone message listener/bootstrap
-of its own — `content/discovery.js` is its only caller, so there is never
-more than one driver of any engine on a session.
+# Tests
 
-# AUTOMATIC DETECTION
+All run this session, all green (245 assertions total across 8 scratch
+suites, plus 18 release-check checks and 6 real-browser scenarios):
 
-- **Pagination detection:** reused `WSNextDetect.findNextControl()` verbatim.
-- **Infinite-scroll detection:** reused `WSAutoScroll.runUntilExhausted()`
-  verbatim — its own card-count/height growth signals, MutationObserver-backed.
-- **Load More detection:** new, page-wide phrase-match + negative-word
-  rejection (see above).
-- **Hybrid strategy:** per-page order is scroll → Load More → Next, never
-  navigating away while the current page can still reveal more (mission
-  section 6). A same-page scroll↔Load-More re-alternation beyond one pass
-  is a deliberate, documented scope limit (see Limitations) — every
-  mission-specified hybrid example (scroll-then-paginate, several Load
-  More clicks before a Next) is exactly this file's own loop, unmodified.
-- **Traversal priority:** current-page expansion is always exhausted
-  (scroll AND Load More, both to their own natural stop) before Next is
-  even looked for.
+| Suite | Assertions | Result |
+|---|---|---|
+| test-canonical-identity.js | 21 | PASS |
+| test-title-extraction.js | 14 | PASS |
+| test-discovery-fixtures.js (12 scenarios) | 35 | PASS |
+| test-discovery-core.js | 53 | PASS |
+| test-regression-existing.js | 25 | PASS |
+| test-popup-processing.js | 28 | PASS |
+| test-discovery-ui.js (new, 3 scenarios) | 30 | PASS |
+| test-export-integrity.js (new) | 41 | PASS |
+| `node scripts/release-check.js` | 18 checks | PASS |
 
-# DISCOVERY
+Real-browser (Playwright + bundled Chromium, real public sites, real
+extension, real messaging — see `test-artifacts/latest/`):
 
-- **Identity strategy:** reuses the existing `pickDedupeKeyForColumns`
-  (prefer a link-like column) → `WSRunState.buildRowKey`/`mergeNewRows`
-  dedup mechanism, unmodified — canonical URL when available, else the
-  existing `entire-row` fingerprint fallback.
-- **Unique registry:** `session.rows`, in `mergeNewRows`'s own
-  always-append-never-reorder order — no second parallel registry.
-- **Stable ordering:** guaranteed by `mergeNewRows`'s own contract; verified directly (10k fixture, `processFirst` order checks, real FIRST-N test).
-- **Dedupe:** reused, unmodified; duplicate-encounter accounting
-  (`WSDiscoveryCore.recordExpansionDelta`) is a new, additive, best-effort
-  diagnostic layered on top via a before/after candidate-count delta
-  around each expansion phase — matches every one of the mission's own
-  worked examples exactly (60+20-with-5-dupes→75 not 80; 1-20/18-40
-  overlap→40 not 43).
-- **Virtualization handling:** free consequence of reusing
-  `mergeNewRows`/`session.rows` — verified directly (TEST 43: a sliding
-  1-20→11-30→21-40 DOM window still yields the full 1-40 registry).
-- **Persistence:** `session.discovery` lives on the same
-  `ws_live_session::<hostname>` object every other live-session field
-  already uses — survives popup close/reopen and navigation via the
-  existing storage mechanism, no new persistence layer.
+- `discovery-pagination-real-site` (books.toscrape.com) — PASS. 3 real
+  pages auto-traversed with NO Auto Next ever enabled, 20→40→60 unique
+  rows, 0 duplicates, real Stop preserved data, real FIRST-10/ALL
+  processing verified. Screenshots visually confirm real "Page 3 of 50"
+  navigation happened.
+- `discovery-scroll-real-site` (quotes.toscrape.com/scroll) — PASS (after
+  2 flaky `chrome.permissions.request()` timeouts — see Limitations). 3
+  real scroll cycles auto-traversed with NO Auto Scroll ever enabled,
+  10→40 unique rows, 0 duplicates, engine correctly chose scrolling on
+  its own.
+- `autopaginate-real-site` (books.toscrape.com, legacy engine) — PASS,
+  400 rows/20 pages, 0 duplicates — confirms the reused engine still
+  works unmodified.
+- `autoscroll-real-site` (quotes.toscrape.com/scroll, legacy engine) —
+  PASS, 60 rows accumulated, 0 duplicates.
+- `cleaning-real-site` (books.toscrape.com) — PASS. Real CSV/JSON/XLSX
+  exports built from real scraped+cleaned data and parsed back
+  programmatically (not just "didn't throw").
+- `etsy-popup` (default scenario, real Etsy) — genuine EXTERNAL BLOCKER:
+  Etsy served a slide-to-verify CAPTCHA challenge, correctly detected and
+  reported, not bypassed. Screenshot confirms a real CAPTCHA, not a false
+  positive/negative.
+- `test:browser-safety` (Browser Process Safety regression check) — PASS.
+  Closing the harness's own browser instance never affects an unrelated,
+  independently-running browser instance.
 
-# COMPLETION
+All screenshots in every scenario above were opened and visually
+inspected, not just read via `result.json`'s `status` field.
 
-- **No-growth strategy:** reused verbatim from Auto Scroll/Load More's own
-  `consecutiveNoNewData >= maxNoNewDataAttempts` (default 3) — never stops
-  after one slow load.
-- **Global completion conditions:** current-page expansion exhausted (both
-  engines) AND no valid Next AND no genuinely new records →
-  `discovery_complete`.
-- **Loop detection:** `WSDiscoveryCore.buildTraversalStateId`/
-  `registerVisitedState` — url+content-signature+unique-count triple,
-  bounded history (4000 entries) — catches an exact-repeat loop and an
-  alternating-URL loop within a few cycles (verified: TEST 47, pure-core test).
-- **Safety limits:** `maxPages` (2000), `maxTotalCycles` (20000), and a
-  hard `MAX_LOOP_ITERATIONS` (6000) ceiling — all high, documented,
-  reported honestly via `stopReason`/`safetyLimitReached: true`, never
-  silently presented as a natural `discovery_complete`.
-- **Stop reasons observed in testing:** `no-more-mechanisms`, `next-disabled`,
-  `traversal-loop-detected`, `origin-changed`, `url-repeat`,
-  `page-load-timeout`, `extraction-error`, `max-pages-safety-limit`,
-  `max-total-cycles-safety-limit`, `max-loop-iterations-safety-limit`, `user`.
+# Bugs found and fixed this mission (self-repair loop)
 
-# PROCESSING
+1. **Test-fixture regression, `test-discovery-fixtures.js`** — after
+   adding the `context` param to `mergeNewRows`, its own `seedAndStart()`
+   helper called `mergeNewRows()` WITHOUT the new context, while every
+   real production call site now passes one — a relative-URL-like fixture
+   ID (`"item-1"`) canonicalized differently on the un-contexted seed call
+   than on every subsequent real call, so page-1 rows were "rediscovered"
+   as new on every later page. Root-caused via direct reproduction of
+   `canonicalizeIdentityValue()`'s real behavior before concluding it was
+   a test-harness bug, not a production one. Fixed by adding the missing
+   `{ baseUrl: window.location.href }` to that one call site.
+2. **Same bug class, `test-regression-existing.js`** — two hand-seeded
+   session fixtures had `seenKeys: { a: true }` (a raw, pre-canonicalization
+   key) that no longer matched the real canonicalized key a merge would
+   compute — one scenario happened not to exercise a real merge and
+   stayed green by luck, the other did and double-counted a row. Fixed by
+   computing the expected key with the real production function instead
+   of guessing its format.
+3. **`ArrayBuffer.isView` vs. `instanceof Uint8Array` in a cross-realm
+   Node `vm` sandbox** — `test-export-integrity.js`'s own sandbox
+   constructs `Uint8Array`s inside the VM context's own realm, so
+   `instanceof` against the host realm's constructor is (correctly) false
+   — not a bug in `utils/xlsx.js`/`utils/zip.js`. Fixed the test to use
+   the realm-agnostic `ArrayBuffer.isView()`.
+4. **Dead `data-i18n-placeholder` HTML attribute** — the new
+   `#discovery-first-n-input`'s placeholder was marked with an attribute
+   convention (`data-i18n-placeholder`) that doesn't exist anywhere in
+   this codebase's actual i18n-application code (every other input in
+   `popup.html` hardcodes a plain English placeholder with no i18n at
+   all) — the attribute would have silently done nothing, leaving the
+   input with no placeholder text ever. Fixed by removing the inert
+   attribute and setting `.placeholder` from `renderDiscoveryUI()` via the
+   real `WSI18n.t()` call instead, which is both correct and (unlike the
+   rest of this project's inputs) actually localized across all 6
+   locales, since the translated key already existed with 100% coverage.
+5. **`chrome.permissions.request()` real-Chrome timing variance
+   (environment characteristic, not a bug)** — the `discovery-scroll-
+   real-site` scenario timed out waiting for the real permission grant
+   twice in a row (90s each), then passed on the third attempt in under
+   2 seconds; an unrelated scenario (`autoscroll-real-site`) targeting the
+   exact same origin took ~30s to resolve in between. This exact
+   characteristic (wide, environment-level timing variance on this API,
+   3s to ~50s+ observed) is independently documented in this file's own
+   prior-mission history, confirming it predates this mission's changes
+   and isn't caused by anything touched here. No code was changed in
+   response — retried per CLAUDE.md's self-repair loop, confirmed not
+   reproducible as a real regression.
 
-- **`processAll()`/`processFirst(n)`:** in `popup.js`, operating on
-  `activeLiveSession.rows` via `WSDiscoveryCore.validateSelection`/
-  `selectRows` (pure, in `utils/discovery.js`). No dedicated UI wires these
-  yet (explicitly out of this mission's scope — see CLAUDE.md) — exposed
-  via `window.__wsDiscoveryTestHooks`, the same "exposed for targeted
-  testing only" convention this codebase already uses
-  (`WSAutoPaginate.runAutoPaginateLoop`, `WSLiveWatch.runDetectionPass`).
-- **Data Cleaning integration:** untouched — processing only narrows
-  `rawRows`, which flows into the exact same `computeTransformedResult()`
-  → cleaner → transform pipeline as before.
-- **Ordering guarantees:** FIRST N always means the first N unique records
-  in real discovery order — verified via the 10k fixture and the real
-  in-tab FIRST-N test (first selected row's title matched the actual
-  first discovered row).
-- **Invalid N:** 0/-5/2.5/"abc"/NaN/undefined/null all rejected with a
-  structured `{ok:false, error}`, never a crash; an over-large N
-  normalizes (clamps) to the real discovered count rather than fabricating rows.
+# Remaining Problems / Limitations
 
-# PERFORMANCE
-
-- **10,000-record test:** `test-discovery-core.js`'s fixture — 10,000
-  unique records (with injected re-sent duplicates) processed via the
-  REAL `WSRunState.mergeNewRows` in ~10ms, stable order preserved,
-  `processFirst` against the real 10k dataset verified.
-- **Runtime:** O(n) per pass (hash-map-based `seenKeys`, reused unmodified
-  from `WSRunState`) — no O(n²) duplicate checks introduced.
-- **Memory:** discovery adds only small, bounded fields to the existing
-  session object (`visitedStates`/`visitedUrls`/`pageSignatures`, all
-  capped) — no per-record metadata duplication, no DOM/screenshot storage.
-
-# AUTOMATED TESTS
-
-- **`test-discovery-core.js`** (scratchpad, plain Node, no DOM): **53/53
-  assertions, 0 failures.** `validateSelection`/`selectRows` (ALL, FIRST N,
-  every invalid-N case, over-large-N normalization), duplicate-encounter
-  accounting matching the mission's own worked examples exactly,
-  visited-state loop detection (exact repeat + alternating-URL loop), and
-  the 10,000-record performance/dedupe fixture.
-- **`test-discovery-fixtures.js`** (scratchpad, JSDOM via
-  `vm.runInContext` — the REAL, unmodified `content/discovery.js` +
-  `content/loadmore.js` + REUSED `content/autoscroll.js`/`content/
-  nextdetect.js`/`content/domwait.js`/`utils/runstate.js`, only
-  `WSScraper.runExtraction` stubbed to read the real live DOM): **35/35
-  assertions, 12/12 scenarios pass** — mission TEST sections 37 (basic
-  pagination), 38 (basic infinite scroll), 39 (Load More), 40 (hybrid), 41
-  (duplicates), 42 (pagination overlap), 43 (virtualized list), 44 (slow
-  load), 45 (false Next), 46 (false Load More), 47 (looping Next), 51
-  (Stop Discovery).
-- **`test-regression-existing.js`** (scratchpad): **25/25 assertions, 0
-  failures.** `utils/cleaners.js`, `utils/templates.js`, `utils/
-  runstate.js` spot-checks, plus direct verification of this mission's two
-  coordination-guard additions (`content/autoscroll.js`'s bootstrap
-  correctly excludes a discovery-owned session while its PRE-EXISTING
-  autoPaginate exclusion and ordinary standalone-resume behavior remain
-  unaffected; `content/livewatch.js` correctly defers to an active
-  discovery session while its ordinary passive-watch behavior remains
-  unaffected).
-- **`test-popup-processing.js`** (scratchpad, JSDOM, real `popup.html` +
-  every real script it loads via `vm.runInContext`, real `chrome.tabs.
-  query` returning a real http(s) URL — this project's own "bootPopup()"
-  convention): **28/28 assertions, 0 failures, 0 console errors during
-  real `init()`.** A real 250-row discovered session is restored by the
-  real, unmodified `restoreLiveSessionIfAny()`; `processFirst(50)`,
-  every invalid-N case, over-large-N normalization, `processAll()`, and a
-  second `processFirst(10)` are all exercised through the real
-  `window.__wsDiscoveryTestHooks` seam; the real, persisted session
-  (verified by re-reading `chrome.storage.local`) correctly shows
-  `discovery.status: 'processing_complete'` and the real
-  `processingSelection`, with `session.rows` (the full registry) provably
-  intact and un-destroyed.
-- **`node scripts/release-check.js`: 18/18 checks pass** — the three new
-  files are correctly picked up by the dynamic `CONTENT_FILES`/directory
-  scans (16 content scripts, up from 13), 100% i18n coverage unaffected
-  (no new user-facing strings — discovery's page-count status reuses the
-  existing `liveSession.scanningPage` key), production ZIP builds and
-  packages cleanly (41 entries).
-- **Full regression:** no new related failures across cleaners/templates/
-  runstate/session-persistence/coordination.
-
-# REAL PAGINATION TEST
-
-- **Site:** `https://books.toscrape.com/` (same site the pre-existing
-  Auto Next real-site test uses).
-- **URL:** `https://books.toscrape.com/`
-- **Trigger:** a single `START_DISCOVERY` message — `START_AUTO_PAGINATE`/
-  `START_AUTO_SCROLL` were never sent.
-- **Initial count:** 20 real rows (page 1).
-- **Pages traversed:** 3 real pages (page-2.html, page-3.html reached
-  automatically), confirmed via real screenshots showing genuinely
-  different books and "Page 3 of 50".
-- **Growth per page:** 20 → 40 → 60 (exactly 20 real, distinct books per page).
-- **Final unique count:** 60, `discoveredUnique === session.rows.length` exactly.
-- **Completion/stop reason:** stopped on command (`STOP_DISCOVERY`,
-  `stopReason: 'user'`, `discoveryComplete: false`) after 3 pages —
-  books.toscrape.com has 50 real pages (1000 books), and with genuine
-  production timeouts (not test-shortened), running the engine to full
-  natural site exhaustion would take on the order of 15-20 minutes; the
-  mission's own real-pagination test spec (section 55) only requires "at
-  least 3 real pages... record exact counts", already satisfied.
-- **Also verified on this real dataset:** 0 duplicate product links across
-  60 rows; real, in-tab `WSDiscoveryCore.validateSelection`/`selectRows`
-  FIRST-10 selection (exactly 10, stable order, first row matched) and ALL
-  selection (60 of 60).
-- Screenshots inspected directly: `discovery-initial.png` (real "1000
-  results - showing 1 to 20"), `discovery-growth-2.png` (real "Page 3 of
-  50" with different books) — genuinely confirms automatic real navigation.
-
-# REAL INFINITE SCROLL TEST
-
-- **Site:** `https://quotes.toscrape.com/scroll`.
-- **Trigger:** a single `START_DISCOVERY` message — `START_AUTO_SCROLL` was never sent.
-- **Initial count:** 10 real quotes.
-- **Scroll cycles:** 3 real, distinct growth cycles observed automatically.
-- **Growth per cycle:** +10 real quotes each (10 → 20 → 30 → 40).
-- **Final unique count:** 40 at the growth checkpoint, growing further to
-  60 during the brief window before Stop was confirmed — `discoveredUnique
-  === session.rows.length` verified exactly on the post-Stop settled snapshot.
-- **Completion/stop reason:** stopped on command (`STOP_DISCOVERY`,
-  `stopReason` not asserted post-hoc but state correctly `discovery_stopped`,
-  `discoveryComplete: false`) after sufficient real growth evidence —
-  the site has 100 quotes total; running to full natural exhaustion was
-  unnecessary given the mission's own "at least 3 growth cycles" bar was
-  already cleared.
-- Also verified: the very first quote/author from before scrolling started
-  is still present after growth (virtualization-safe); 0 duplicate rows
-  across the accumulated dataset.
-- Screenshots inspected directly: `discovery-scroll-initial.png` (Einstein/
-  Rowling quotes) vs. `discovery-scroll-final.png` (Twilight/Hemingway/
-  Helen Keller quotes further down) — genuinely different real content,
-  confirming real automatic scrolling occurred.
-
-# REAL LOAD MORE / HYBRID
-
-Load More and same-page scroll+Load-More hybrids were **not** verified
-against a real public site this session (no stable, suitable public Load
-More demo site was located within this mission's time budget). Per the
-mission's own explicit allowance (sections 57/58: "If no stable public
-Load More site is available, fixture/integration verification is
-acceptable... document honestly"), this mechanism is verified instead via
-the JSDOM fixture suite (`TEST 39` — Load More alone reaches 60 unique via
-3 real click-driven growth cycles against the real, unmodified `content/
-loadmore.js`; `TEST 40` — a hybrid scroll+Load-More+pagination scenario;
-`TEST 46` — false-Load-More rejection against real, unmodified detection
-logic), which exercises the genuine production code path end-to-end
-against a real DOM, with only the site itself (not the engine) simulated.
-Documented honestly here rather than overclaimed.
-
-# REAL PROCESSING TEST
-
-- **Discovered count:** 60 (books.toscrape.com run).
-- **FIRST N selected:** 10 — `WSDiscoveryCore.validateSelection`/
-  `selectRows` called for real, inside the live tab, against the real
-  discovered rows.
-- **Processed count:** exactly 10, stable order (first selected row's
-  title matched the real first-discovered row's title).
-- **ALL test result:** 60 of 60 selected.
-- **Representative cleaned fields:** Title/Link/Price columns extracted
-  live from the real site (e.g. real book titles, real `£NN.NN` prices,
-  real `catalogue/...html` links) — the FIRST-N/ALL selection operates on
-  these same real, already-cleaned-compatible row objects; Data Cleaning
-  itself is unmodified by this mission (verified separately in the
-  regression suite).
-- Additionally, the full `processAll()`/`processFirst(n)` **popup-level**
-  integration (not just the shared core) was verified via
-  `test-popup-processing.js` against a real, restored 250-row session —
-  see Automated Tests above.
-
-# EVIDENCE
-
-`test-artifacts/latest/`: `discovery-initial.png`, `discovery-growth-1.png`,
-`discovery-growth-2.png`, `discovery-complete.png` (pagination run);
-`discovery-scroll-initial.png`, `discovery-scroll-growth-1.png`,
-`discovery-scroll-growth-2.png`, `discovery-scroll-final.png`,
-`discovery-scroll-complete.png` (scroll run); `test.log`, `result.json` —
-all visually inspected, not just trusted from status text. One harmless,
-pre-existing, site-side console artifact observed on both real sites (a
-mixed-content HTTP jQuery CDN reference blocked by the browser on
-books.toscrape.com, and an "Access to storage is not allowed from this
-context" warning on both — the same class of pre-existing, unrelated
-site/extension-boundary console noise prior missions in this project have
-already observed and documented; does not affect extraction/discovery).
-
-# REGRESSIONS
-
-Confirmed via the regression suite: `utils/cleaners.js` (RAW/TEXT/PRICE/
-NUMBER/URL), `utils/templates.js` (`cleanerType` normalization/defaults),
-`utils/runstate.js` (hostname normalization, dedup/order) all still behave
-identically. This mission's two small coordination additions verified to
-(a) actually prevent a double-driver race with the new engine and (b)
-leave every pre-existing coordination path (autoPaginate↔autoScroll↔
-livewatch, ordinary standalone Auto Scroll resume, ordinary passive
-live-session watching) completely unaffected. `content/autopaginate.js`
-and its own real-site test are entirely untouched by this mission.
-
-# REAL BUGS FOUND AND FIXED VIA THIS MISSION'S OWN TESTING
-
-1. **`content/loadmore.js` detection-scope bug:** an initial "common
-   ancestor of the first/last known card" scoping heuristic degenerated to
-   the card container element itself for the ordinary one-shared-parent
-   markup shape (a node trivially "contains" itself), incorrectly hiding a
-   real Load More button sitting as the container's own sibling — a very
-   common real-world pattern. Fixed by dropping the DOM-proximity
-   restriction entirely (mirroring `content/nextdetect.js`'s own
-   page-wide-scan-plus-phrase-matching approach).
-2. **Race: a Stop request could be silently clobbered by a fabricated
-   "discovery_complete"** (a direct violation of mission section 23),
-   found via a dedicated fixture test (TEST 51) and confirmed reachable in
-   the real browser too. Root cause: `chrome.storage.local.get()`
-   resolves with a snapshot frozen at CALL time, not callback-fire time —
-   an in-flight engine call aborted mid-wait can re-read storage on its
-   own way out at a moment that predates a concurrent `STOP_DISCOVERY`
-   request's own write, even though its callback fires after. No amount
-   of "re-read fresh right before the terminal write" fully closes this.
-   Fixed with a synchronous, in-memory `discoveryStopRequested` flag — set
-   in the same tick as `controller.abort()`, checked first (no storage
-   round-trip) by `stillRunning()` and by `finalizeComplete`/
-   `finalizeStopped` — closing the race completely regardless of storage-read timing.
-3. **`pagesVisited` undercounting after a real navigation:** found via the
-   real books.toscrape.com run — a real full-page navigation can (and,
-   observed directly, does) destroy the outgoing content-script instance
-   before its post-navigation bookkeeping write lands (the exact same
-   real-Chrome race `content/autopaginate.js`'s own bootstrap comment
-   documents in detail for its own counter). The counter was being
-   incremented in the wrong place (after the risky navigation, mirroring a
-   naive design) instead of the moment a new page is confirmed scraped
-   (mirroring `content/autopaginate.js`'s own battle-tested placement).
-   Fixed by moving the increment (and the analogous per-page duplicate-
-   accounting baseline reset) to the scrape branch itself, which the fresh
-   post-navigation script instance reliably executes and persists.
-4. **`discoveredUnique` momentarily lagging `session.rows.length`:** found
-   via the real quotes.toscrape.com run — `content/autoscroll.js`'s/
-   `content/loadmore.js`'s own per-cycle writes (reused completely
-   unmodified, by design) persist the session mid-phase with whatever
-   `discoveredUnique` happened to be at that moment, always caught up
-   again at the next phase boundary — but a poll landing exactly mid-phase
-   could observe a lagging (never fabricated-ahead) value. Fixed by having
-   every terminal-state write (`finalizeComplete`, `finalizeStopped`, the
-   `STOP_DISCOVERY` handler) reconcile `discoveredUnique = rows.length`
-   one final time, guaranteeing exact equality at any settled/rest state;
-   documented as a narrow, accepted, non-user-visible limitation during an
-   actively-running multi-cycle phase (the user-visible row count has
-   always read `rows.length` directly, never this field).
-5. Two test-harness-only bugs (not product bugs), found and fixed while
-   writing the fixture suite: simulating "pagination naturally ends" via a
-   *separate* extra click that only removes the Next control (a
-   single-node removal produces too few mutations to cross
-   `waitForNavigationOrMutation`'s own mutation threshold) instead of
-   atomically as part of the *last real* page-advance; and a flat, shared
-   scroll/Load-More "call count" schedule silently misaligning once an
-   engine's own internal no-growth retry count differed page-to-page
-   (fixed with a per-page schedule).
-
-# LIMITATIONS
-
-- Real Load More / hybrid-on-one-page traversal is verified via fixture
-  only (see "REAL LOAD MORE / HYBRID" above) — no suitable stable public
-  Load More demo site was located this session; documented honestly per
-  the mission's own explicit allowance rather than overclaimed.
-- `discoveredUnique` can lag `session.rows.length` by a small margin
-  *while a scroll/Load-More phase is actively mid-flight* (never ahead,
-  never fabricated) — guaranteed exact at every terminal/rest state (see
-  bug #4 above). Not user-visible today (the live row count shown anywhere
-  in the product reads `rows.length` directly).
-- A real hybrid site whose *same page* alternates between scroll and Load
-  More more than once (scroll a bit, click Load More, scroll again, click
-  Load More again, all on ONE page) is handled with a single pass of each
-  per page visit, not a full alternation — a deliberate, documented scope
-  limit; every mission-specified hybrid example (different mechanisms on
-  different pages, or several same-mechanism actions before a Next) is
-  fully supported.
-- `siteAdvertisedTotal` (an optional, purely informational field the
-  mission explicitly allows) is not populated by any generic detection
-  logic this session — left `null` always; never influences the
-  authoritative `discoveredUnique` count either way.
-- `popup.js`'s BAŞLA → `session.discovery` seeding + `START_DISCOVERY`
-  send is verified by careful code review and by the fact that the exact
-  downstream contract it produces (a session with `discovery` seeded +
-  a `START_DISCOVERY` message) is exhaustively proven correct by both the
-  fixture suite and the two real-browser tests, plus `popup.js` as a whole
-  loading and running cleanly (0 console errors) through its full
-  session-restore/processing path in `test-popup-processing.js` — the BAŞLA
-  click handler itself was not driven end-to-end via a real DOM click in
-  this session (its surrounding column-picking UI is unrelated to this
-  mission and wasn't set up in the harness); this is a narrower gap than
-  the fully-proven downstream mechanism, not a known defect.
-- `chrome.permissions.request()` continued to exhibit the same
-  previously-documented wide timing variance in this environment
-  (observed 3s to ~50s across attempts this session) — confirmed
-  environment-level, not caused by this mission's code.
-- Running the real-browser scenarios as *background* shell tasks was
-  observed to get killed by the environment partway through, three times
-  in a row, with no error from the extension/test itself; running them in
-  the *foreground* instead completed normally every time (both scenarios
-  passed this way, twice each, consistently) — noted here as an
-  environment/tooling characteristic of this session, not a product defect.
+- `discoveredUnique`/`duplicateEncounters` are conflated for the reused
+  Auto Scroll/Load-More engines' own internal cycles (only `content/
+  discovery.js`'s own explicit per-page scrape gets the precise,
+  separated `invalidSkipped` vs. `duplicateEncounters` split) — an
+  honest, documented, narrow scope limit inherited from those engines'
+  existing opaque internals, not a data-integrity defect (nothing is
+  ever mis-classified as unique; the split is just less granular there).
+- The real-browser harness cannot drive the native toolbar popup
+  (documented, pre-existing Playwright/Chromium limitation — see `e2e/
+  run.js`'s own header comment) — the new discovery-status/ALL/FIRST-N
+  UI panel is therefore verified in real Chrome only up to the point the
+  harness's popup-as-a-page workaround allows (which never reaches
+  `renderLiveSessionUI()`'s live-session branch — this is the exact same
+  pre-existing gap every prior mission's popup UI work has had, not new).
+  The panel's actual rendering/interaction logic is instead exhaustively
+  covered by a real popup.html + popup.js JSDOM integration test
+  (`test-discovery-ui.js`, 30 assertions, 3 scenarios, real DOM click/
+  input events, not the test-only hook seam) — this is the same
+  established mitigation this project's prior missions used for the same
+  known gap.
+- Etsy itself remains a confirmed, repeatable anti-bot CAPTCHA block in
+  this environment (reconfirmed again this session, screenshot-verified)
+  — per the mission's own explicit allowance, Etsy-specific canonical-
+  identity and title-contamination regression tests use deterministic
+  local fixtures (`test-canonical-identity.js`, `test-title-extraction.js`)
+  instead of a live Etsy page.
 
 # GIT
 
-Branch: `develop`, confirmed synced with `origin/develop` at session
-start (clean working tree). Nothing committed, nothing pushed this
-session. `main` and `stable/v1.31.0` untouched. Diff is scoped entirely to
-this mission: new `utils/discovery.js`, `content/loadmore.js`, `content/
-discovery.js`, `e2e/tests/discovery-pagination-real-site.test.js`, `e2e/
-tests/discovery-scroll-real-site.test.js`; modified `popup/popup.js`,
-`popup/popup.html`, `background/background.js`, `content/autoscroll.js`,
-`content/livewatch.js`, `package.json` (+2 npm scripts). `MISSION.md`
-itself, rewritten for this mission, is also part of this diff, per this
-project's established convention.
+Branch: `develop`, was in sync with `origin/develop` at session start.
+Nothing committed, nothing pushed this session — all changes below are an
+uncommitted, reviewable working-tree diff, exactly as instructed
+("DO NOT COMMIT. DO NOT PUSH. DO NOT MERGE INTO MAIN."). `main` and
+`stable/v1.31.0` untouched.
+
+Modified (13 files, no new files, no deletions):
+`content/autodetect.js`, `content/autopaginate.js`, `content/autoscroll.js`,
+`content/discovery.js`, `content/livewatch.js`, `content/loadmore.js`,
+`content/pagination.js`, `popup/popup.html`, `popup/popup.js`,
+`utils/discovery.js`, `utils/i18n-data.js`, `utils/runstate.js`,
+`utils/transforms.js`. `MISSION.md` itself, rewritten for this mission, is
+also part of this diff, per this project's established convention.
+`dist/web-scraper-v1.0.2.zip` was regenerated by `scripts/release-check.js`
+but stays gitignored, as always.

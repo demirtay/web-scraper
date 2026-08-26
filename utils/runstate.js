@@ -68,16 +68,126 @@
     return String(host).toLowerCase().replace(/^www\./, '');
   }
 
+  // =====================================================================
+  // CANONICAL RECORD IDENTITY (data-integrity fix): the same real
+  // product/listing can appear under multiple URLs that differ only by
+  // tracking parameters (Etsy's own `?ref=...&click_key=...&click_sum=...`
+  // being the concrete, reported case) — raw string equality on the
+  // extracted link therefore under-counts duplicates as distinct unique
+  // records. This canonicalizes a URL-shaped identity value BEFORE it is
+  // used as a dedupe key, never after (mission: "Dedupe must operate
+  // during discovery, not only during final export") — the RAW extracted
+  // value itself (row[dedupeKey]) is never touched or overwritten by this;
+  // only the internal key mergeNewRows uses to decide "have I seen this
+  // one already" is affected. A value that isn't a resolvable URL at all
+  // (a plain-text identity column, a malformed value) falls straight back
+  // to the original raw-string behavior — never a crash, never a
+  // fabricated identity.
+  //
+  // Kept as this file's own local copy (not a cross-file reference to
+  // utils/transforms.js's own identically-named list) so dedupe — which
+  // must run in every content-script context, several of which never
+  // load utils/transforms.js at all — has no load-order dependency on a
+  // file that isn't part of CONTENT_FILES. Both lists are intentionally
+  // kept in sync by hand; this project's own established convention for
+  // every other "local copy of a shared primitive" (see e.g. content/
+  // autoscroll.js's/content/loadmore.js's own local scrapeCurrentPage).
+  var IDENTITY_TRACKING_PARAMS = [
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+    'gclid', 'fbclid', 'msclkid', 'mc_cid', 'mc_eid',
+    'ref', 'ref_src', 'ref_url', 'ref_page', 'ref_sr', 'referrer',
+    'click_key', 'click_sum',
+    'campaign_id', 'campaignid', 'aff_id', 'affiliate_id',
+    'spm', 'igshid', 'yclid', 'dclid', '_ga', '_gl'
+  ];
+
+  /**
+   * Known stable product/listing-ID URL shapes — checked BEFORE generic
+   * tracking-param stripping, since a real listing ID survives even a
+   * slug/title change in the URL path (mission's own explicit priority
+   * order: "1. stable product/item ID" ranks above "2. canonical URL").
+   * Etsy is the mission's own concrete, required example; Amazon/eBay are
+   * included as the same well-known pattern applied opportunistically —
+   * none of these are hardcoded as the ONLY mechanism (mission section 5's
+   * "the title extraction system must be generic... site-specific
+   * heuristics may supplement" applies equally here): a site with no
+   * matching pattern simply falls through to the generic canonical-URL
+   * step below, never a special case that BLOCKS deduping working at all.
+   */
+  var KNOWN_ID_URL_PATTERNS = [
+    { test: function (u) { return /(^|\.)etsy\.com$/i.test(u.hostname); },
+      extract: function (u) { var m = u.pathname.match(/\/listing\/(\d+)(?:\/|$)/i); return m ? 'etsy:' + m[1] : null; } },
+    { test: function (u) { return /(^|\.)amazon\.[a-z.]+$/i.test(u.hostname); },
+      extract: function (u) { var m = u.pathname.match(/\/(?:dp|gp\/product)\/([A-Za-z0-9]{10})(?:[/?]|$)/i); return m ? 'amazon:' + m[1].toUpperCase() : null; } },
+    { test: function (u) { return /(^|\.)ebay\.[a-z.]+$/i.test(u.hostname); },
+      extract: function (u) { var m = u.pathname.match(/\/itm\/(?:[^/]+\/)?(\d+)(?:[/?]|$)/i); return m ? 'ebay:' + m[1] : null; } }
+  ];
+
+  function extractKnownProductId(u) {
+    for (var i = 0; i < KNOWN_ID_URL_PATTERNS.length; i++) {
+      var pattern = KNOWN_ID_URL_PATTERNS[i];
+      var matches = false;
+      try { matches = pattern.test(u); } catch (e) { matches = false; }
+      if (!matches) continue;
+      var id = null;
+      try { id = pattern.extract(u); } catch (e) { id = null; }
+      if (id) return id;
+    }
+    return null;
+  }
+
+  /**
+   * Canonicalizes a raw scraped value into a stable record-identity
+   * string, or returns null when the value isn't a resolvable URL at all
+   * (caller then falls back to the original raw value — see buildRowKey).
+   * Never touches an identifying query parameter (?id=, ?sku=,
+   * ?product_id=, etc.) — only the fixed IDENTITY_TRACKING_PARAMS list
+   * above is ever removed, and remaining params are sorted (not dropped)
+   * so two URLs differing only in query-parameter ORDER still resolve to
+   * the same identity.
+   * @param {*} rawValue
+   * @param {string} [baseUrl] resolves a relative URL — real extracted
+   *   `href` values from content/selector.js are always already absolute
+   *   (the DOM `.href` IDL property itself resolves them), so this is a
+   *   robustness extra, not a requirement for the common case.
+   */
+  function canonicalizeIdentityValue(rawValue, baseUrl) {
+    if (rawValue == null) return null;
+    var s = String(rawValue).trim();
+    if (!s) return null;
+    var u;
+    try { u = new URL(s, baseUrl); } catch (e) { return null; }
+
+    var knownId = extractKnownProductId(u);
+    if (knownId) return knownId;
+
+    IDENTITY_TRACKING_PARAMS.forEach(function (p) { u.searchParams.delete(p); });
+    var uniqueKeys = [];
+    u.searchParams.forEach(function (value, key) { if (uniqueKeys.indexOf(key) === -1) uniqueKeys.push(key); });
+    uniqueKeys.sort();
+    var sortedParams = new URLSearchParams();
+    uniqueKeys.forEach(function (k) {
+      u.searchParams.getAll(k).forEach(function (v) { sortedParams.append(k, v); });
+    });
+    var search = sortedParams.toString();
+    var pathname = u.pathname.replace(/\/+$/, '') || '/';
+    return u.protocol + '//' + u.hostname.toLowerCase() + pathname + (search ? '?' + search : '');
+  }
+
   /**
    * Builds a stable dedup key for one row. Always iterates the known
    * `columns` array (never Object.keys(row)), so key order can never
    * depend on incidental object property insertion order.
+   * `context.baseUrl`, when given, resolves a relative identity value —
+   * optional (see canonicalizeIdentityValue's own doc comment).
    */
-  function buildRowKey(row, columns, dedupeKey) {
+  function buildRowKey(row, columns, dedupeKey, context) {
     if (!dedupeKey || dedupeKey === 'entire-row') {
       return columns.map(function (c) { return row[c.id] || ''; }).join('␟');
     }
-    return String(row[dedupeKey] || '');
+    var raw = row[dedupeKey];
+    var canonical = canonicalizeIdentityValue(raw, context && context.baseUrl);
+    return canonical != null ? canonical : String(raw || '');
   }
 
   function defaultLimitsForMode(mode) {
@@ -150,13 +260,19 @@
   /**
    * Merges a freshly-extracted pass of rows into the run's accumulated,
    * deduplicated dataset. Rows already seen (by the configured dedupe
-   * key) are silently skipped — never re-added, never counted as new.
+   * key, canonicalized per buildRowKey above) are silently skipped —
+   * never re-added, never counted as new. `context.baseUrl` (optional —
+   * see buildRowKey/canonicalizeIdentityValue) is threaded straight
+   * through; every real production caller passes `location.href` (content
+   * scripts) or the popup's own `pageUrl` so a relative identity value
+   * resolves correctly, though real extracted `href` values are already
+   * absolute in practice (see canonicalizeIdentityValue's own comment).
    */
-  function mergeNewRows(runState, newRawRows, columns) {
+  function mergeNewRows(runState, newRawRows, columns, context) {
     var seen = runState.seenKeys || {};
     var added = [];
     (newRawRows || []).forEach(function (row) {
-      var key = buildRowKey(row, columns, runState.dedupeKey);
+      var key = buildRowKey(row, columns, runState.dedupeKey, context);
       if (!Object.prototype.hasOwnProperty.call(seen, key)) {
         seen[key] = true;
         added.push(row);
@@ -341,6 +457,8 @@
     setStatus: setStatus,
     buildRowKey: buildRowKey,
     mergeNewRows: mergeNewRows,
+    canonicalizeIdentityValue: canonicalizeIdentityValue,
+    IDENTITY_TRACKING_PARAMS: IDENTITY_TRACKING_PARAMS,
     normalizeHostname: normalizeHostname,
     evaluateAutoScrollStop: evaluateAutoScrollStop,
     evaluateMultiPageStop: evaluateMultiPageStop,
