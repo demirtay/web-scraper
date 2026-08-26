@@ -77,6 +77,26 @@
       // internal cycles individually exclude are still correctly kept
       // OUT of discoveredUnique, just not separately counted here.
       invalidSkipped: 0,
+      // TRAVERSAL FIX mission (section 3): additional, purely additive
+      // diagnostic counters — internal/development-only (mission section
+      // 7: "detailed diagnostics can remain internal"), never renaming or
+      // replacing the fields above that popup UI/tests already depend on.
+      // rawRecordsSeen is the cumulative raw-DOM-match count across every
+      // scrape pass (see recordScrapePassOutcome) — always >= discoveredUnique
+      // + invalidSkipped + duplicateEncounters, a useful sanity total.
+      // noGrowthCycles counts consecutive expansion phases (scrape/scroll/
+      // load-more) that added zero new unique rows, reset the moment one
+      // does — a direct signal for "how close to exhaustion are we,"
+      // exposed for diagnostics only; it does NOT drive any new stop
+      // condition on its own (the existing per-engine retry budgets and
+      // next/loop/safety-limit checks already own that decision — mission
+      // section 3's own "do not stop merely because one attempt produced
+      // no result").  paginationCycles counts genuine Next-control
+      // advances specifically (distinct from pagesVisited, which also
+      // counts the starting page) — incremented in onPageAdvance below.
+      rawRecordsSeen: 0,
+      noGrowthCycles: 0,
+      paginationCycles: 0,
       pagesVisited: 1,
       scrollCycles: 0,
       loadMoreActions: 0,
@@ -139,6 +159,7 @@
     discovery.duplicateEncounters += duplicatesThisPhase;
     discovery.discoveredUnique = afterUnique;
     discovery.currentPageBaselineCandidateCount = afterCandidateCount || 0;
+    discovery.noGrowthCycles = uniqueDelta > 0 ? 0 : (discovery.noGrowthCycles || 0) + 1;
     discovery.updatedAt = now();
     return discovery;
   }
@@ -161,6 +182,8 @@
     var duplicates = Math.max(0, (acceptedCount || 0) - (newUniqueCount || 0));
     discovery.invalidSkipped += excluded;
     discovery.duplicateEncounters += duplicates;
+    discovery.rawRecordsSeen = (discovery.rawRecordsSeen || 0) + (rawCount || 0);
+    discovery.noGrowthCycles = (newUniqueCount || 0) > 0 ? 0 : (discovery.noGrowthCycles || 0) + 1;
     discovery.discoveredUnique = afterUnique;
     discovery.currentPageBaselineCandidateCount = afterCandidateCount || 0;
     discovery.updatedAt = now();
@@ -184,6 +207,14 @@
     // destroy the script instance before a write made HERE would ever
     // land).
     discovery.currentTraversalMethod = 'pagination';
+    // paginationCycles (mission section 3 diagnostics): both call sites
+    // in content/discovery.js's STEP 4 ('url-changed' AND 'dom-changed')
+    // only ever reach onPageAdvance() after a legitimate Next control was
+    // actually found and clicked — a genuine pagination advance either
+    // way, full navigation or SPA-style swap — so counting it here once,
+    // in the one shared function both branches call, is correct for both
+    // without duplicating the increment at each call site.
+    discovery.paginationCycles = (discovery.paginationCycles || 0) + 1;
     discovery.updatedAt = now();
     return discovery;
   }

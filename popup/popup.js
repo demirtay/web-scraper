@@ -1025,7 +1025,7 @@
       // applyColumnCleaners, same "never fabricate" contract; an absent
       // sampleValue still shows the placeholder dash, never a cleaned
       // guess derived from nothing.
-      var type = c.cleanerType || 'raw';
+      var type = effectiveCleanerType(c);
       var display = c.sampleValue;
       if (display && type !== 'raw' && typeof WSCleaners !== 'undefined') {
         try { display = WSCleaners.applyCleaner(type, display, { baseUrl: pageUrl }); }
@@ -5293,15 +5293,34 @@
   // disabled... existing behavior must remain unchanged" holds by
   // construction, not merely as an emergent property of every cleaner
   // being a no-op.
+  /** TRAVERSAL/CLEANING mission (section 5): the EFFECTIVE cleaner type
+   * for a column — the user's own explicit choice (`col.cleanerType`,
+   * including an explicit 'raw') always wins and is NEVER second-guessed
+   * (that dropdown's own "byte-for-byte, no exceptions" RAW contract is
+   * absolute); only a column the user has NEVER touched at all
+   * (`cleanerType` still nullish — see the setup UI's own
+   * `col.cleanerType || 'raw'` DISPLAY-only default, which never writes
+   * 'raw' into the data until an actual dropdown change fires) gets a
+   * smart default inferred from its own name (WSCleaners.inferCleanerType
+   * — Price/Fiyat, Old Price/Eski Fiyat, Link/URL). Falls back to 'raw'
+   * when nothing can be confidently inferred, identical to today. */
+  function effectiveCleanerType(col) {
+    if (col.cleanerType) return col.cleanerType;
+    if (typeof WSCleaners !== 'undefined' && WSCleaners.inferCleanerType) {
+      try { return WSCleaners.inferCleanerType(col.name) || 'raw'; } catch (e) { /* fall through */ }
+    }
+    return 'raw';
+  }
+
   function applyColumnCleaners(rows, columns, context) {
     // typeof-guarded (not a bare `WSCleaners` reference) so this degrades
     // safely to "no cleaning" — identical to RAW — rather than throwing,
     // in any context that hasn't loaded utils/cleaners.js.
-    if (typeof WSCleaners === 'undefined' || !columns.some(function (c) { return c.cleanerType && c.cleanerType !== 'raw'; })) return rows;
+    if (typeof WSCleaners === 'undefined' || !columns.some(function (c) { return effectiveCleanerType(c) !== 'raw'; })) return rows;
     return rows.map(function (row) {
       var clone = Object.assign({}, row);
       columns.forEach(function (c) {
-        var type = c.cleanerType || 'raw';
+        var type = effectiveCleanerType(c);
         if (type === 'raw') return;
         try { clone[c.id] = WSCleaners.applyCleaner(type, row[c.id], context); }
         catch (e) { /* a single malformed value must never break the row (spec #25) — keep it as-extracted */ }
@@ -5322,6 +5341,18 @@
     // (spec #14: "never replace original columns accidentally").
     var baseColumns = deepScrapeColumns.length ? state.columns.concat(deepScrapeColumns) : state.columns;
     var cleanedRows = applyColumnCleaners(rawRows, baseColumns, { baseUrl: pageUrl });
+    // TRAVERSAL/CLEANING mission (section 5/8): always-on data-integrity
+    // fixes (Old Price duplicating Current Price, generic ad/marketplace
+    // boilerplate masquerading as a Seller name) — never gated behind any
+    // per-column setting, since these are correctness fixes for
+    // objectively wrong data, not a cleaning-style preference. Runs AFTER
+    // column cleaning so the OLD-PRICE-equals-CURRENT-PRICE comparison
+    // sees already-deduplicated price text, exactly like a user reading
+    // the final exported values would.
+    if (typeof WSCleaners !== 'undefined' && WSCleaners.applySemanticIntegrityFixes) {
+      try { cleanedRows = WSCleaners.applySemanticIntegrityFixes(cleanedRows, baseColumns); }
+      catch (e) { /* never let this optional integrity pass break rendering — keep the already-cleaned rows */ }
+    }
     var result;
     try {
       result = WSTransforms.applyTransforms(cleanedRows, baseColumns, activeTransforms, { baseUrl: pageUrl });

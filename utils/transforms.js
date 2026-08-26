@@ -509,7 +509,7 @@
     'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
     'gclid', 'fbclid', 'msclkid', 'mc_cid', 'mc_eid',
     'ref', 'ref_src', 'ref_url', 'ref_page', 'ref_sr', 'referrer',
-    'click_key', 'click_sum',
+    'click_key', 'click_sum', 'ga_order', 'content_source',
     'campaign_id', 'campaignid', 'aff_id', 'affiliate_id',
     'spm', 'igshid', 'yclid', 'dclid', '_ga', '_gl'
   ];

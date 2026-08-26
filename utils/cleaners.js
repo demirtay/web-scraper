@@ -230,13 +230,19 @@
     return CURRENCY_MARKER_RE.test(span);
   }
 
-  function cleanPrice(v) {
-    if (isBlank(v)) return v;
-    var s = String(v);
-    var spans = s.match(PRICE_SPAN_RE) || [];
-    var candidates = spans.filter(function (span) {
+  /** Shared span-extraction step for cleanPrice/priceNumericValue below —
+   * pulled out so both can agree on exactly what counts as a confident
+   * price candidate without duplicating the filter logic. */
+  function findPriceCandidateSpans(s) {
+    var spans = String(s).match(PRICE_SPAN_RE) || [];
+    return spans.filter(function (span) {
       return spanHasCurrency(span) || DECIMAL_CENTS_TAIL_RE.test(span.trim());
     });
+  }
+
+  function cleanPrice(v) {
+    if (isBlank(v)) return v;
+    var candidates = findPriceCandidateSpans(String(v));
     if (!candidates.length) return v; // nothing confidently price-shaped -> preserve original, never fabricate
 
     var first = candidates[0].trim();
@@ -251,6 +257,33 @@
       if (Math.abs(val - firstVal) > 0.001) return v; // two DIFFERENT price values present -> ambiguous, never guess which is "the" price
     }
     return first; // single price, or a confirmed exact duplicate of it -> the real, already-correct first occurrence
+  }
+
+  /** TRAVERSAL/CLEANING mission (section 5, OLD PRICE): extracts the
+   * single confident numeric value a price-shaped string represents (the
+   * SAME candidate-span logic cleanPrice itself uses), or null when
+   * nothing confidently price-shaped is found, or when the string
+   * contains two genuinely DIFFERENT price values (ambiguous — never
+   * guesses). Used to compare a "current price" column's value against
+   * an "old/original price" column's value for the SAME row — never to
+   * display a value, only to detect "these are the same underlying
+   * amount" so a genuinely duplicated old price can be safely blanked
+   * (mission: "Do not duplicate the current price into OLD PRICE").
+   */
+  function priceNumericValue(v) {
+    if (isBlank(v)) return null;
+    var candidates = findPriceCandidateSpans(String(v));
+    if (!candidates.length) return null;
+    var m0 = candidates[0].match(NUMERIC_RUN_RE);
+    var firstVal = m0 ? parseNumericRun(m0[0]) : null;
+    if (firstVal === null) return null;
+    for (var i = 1; i < candidates.length; i++) {
+      var mi = candidates[i].match(NUMERIC_RUN_RE);
+      var val = mi ? parseNumericRun(mi[0]) : null;
+      if (val === null) continue;
+      if (Math.abs(val - firstVal) > 0.001) return null; // ambiguous — refuse rather than guess
+    }
+    return firstVal;
   }
 
   // ---- URL -----------------------------------------------------------------
@@ -269,6 +302,152 @@
     var WT = root.WSTransforms;
     if (!WT || !WT.removeTrackingParams) return String(v).trim();
     return WT.removeTrackingParams(v, context);
+  }
+
+  // =====================================================================
+  // AUTOMATIC SEMANTIC CLEANING (traversal/cleaning mission, section 5):
+  // "The extension must NOT require the user to decide..." extends here
+  // too — a column's cleanerType stays OFF (raw) by default and the user
+  // is never forced to configure anything, but a column whose OWN NAME
+  // already makes its semantic role unambiguous (Price/Fiyat, Old Price/
+  // Eski Fiyat, Link/URL) gets the obviously-correct cleaner applied
+  // automatically, with ZERO change to this file's absolute rule: a
+  // column whose cleanerType was EXPLICITLY set by the user (including
+  // explicitly 'raw') is NEVER touched by inference — inferCleanerType is
+  // consulted ONLY when col.cleanerType is nullish (the user has never
+  // interacted with that column's cleaner dropdown at all — see
+  // popup.js's own `col.cleanerType || 'raw'` display-only default,
+  // which never writes 'raw' into the data until the user actually picks
+  // it). This keeps RAW's own "byte-for-byte, no exceptions" contract
+  // fully intact for anyone who explicitly chose it.
+  //
+  // Deliberately narrow and generic — no site-specific column-name
+  // literals, matching this project's own established scope for
+  // "generic, non-marketplace-specific" heuristics (e.g. content/
+  // autodetect.js's SELLER_BADGE_RE/SHIPPING_LABEL_RE). Only the two
+  // safest, most unambiguous inferences are made; a column name that
+  // doesn't clearly match one of these is left with no inferred type at
+  // all (null), same as today.
+  // =====================================================================
+
+  var OLD_PRICE_NAME_RE = /\b(?:old|original|regular|list|was)\s*price\b|\bprice\s*\((?:old|original|was)\)|\beski\s*fiyat\b|\bönceki\s*fiyat\b|\bindirimsiz\s*fiyat\b/i;
+  var PRICE_NAME_RE = /\bprice\b|\bfiyat\b/i;
+  var LINK_NAME_RE = /\b(?:link|url|bağlantı)\b/i;
+  var SELLER_NAME_RE = /\b(?:seller|shop|store|vendor|satıcı|mağaza)\b/i;
+
+  /** Pure, column-NAME-based inference (never DOM/site-specific) of the
+   * one obviously-correct cleanerType for a column, or null when nothing
+   * matches confidently. `name` is whatever the user (or auto-detection)
+   * named the column — this is deliberately the same generic, language-
+   * spanning vocabulary used elsewhere in this project. Old Price is
+   * checked BEFORE the plain price check since "Old Price"/"Eski Fiyat"
+   * also contains the word "price"/"fiyat". */
+  function inferCleanerType(name) {
+    var n = String(name || '');
+    if (OLD_PRICE_NAME_RE.test(n)) return 'price';
+    if (PRICE_NAME_RE.test(n)) return 'price';
+    if (LINK_NAME_RE.test(n)) return 'url';
+    return null;
+  }
+
+  /** True when a column's name plausibly holds an "old/original/was"
+   * price — used only to decide whether the CROSS-COLUMN old-price-
+   * equals-current-price check below applies to it, never to change how
+   * its own value is cleaned (that's inferCleanerType's job, and both
+   * price roles get the identical 'price' cleaner). */
+  function isOldPriceColumnName(name) {
+    return OLD_PRICE_NAME_RE.test(String(name || ''));
+  }
+
+  /** True when a column's name plausibly holds a CURRENT/sale price —
+   * i.e. it mentions price/fiyat but is NOT itself an old-price column. */
+  function isCurrentPriceColumnName(name) {
+    var n = String(name || '');
+    return PRICE_NAME_RE.test(n) && !OLD_PRICE_NAME_RE.test(n);
+  }
+
+  /** True when a column's name suggests it holds a seller/shop/store
+   * name — used only to decide whether the seller-boilerplate rejection
+   * below applies to it; never applied to an unrelated text column. */
+  function isSellerColumnName(name) {
+    return SELLER_NAME_RE.test(String(name || ''));
+  }
+
+  // Generic ad-disclosure / accessibility-boilerplate / bare-marketplace-
+  // label patterns that are NEVER a real seller/shop name, regardless of
+  // marketplace (mission's own real example: "Ad by Etsy seller"). Kept
+  // bilingual (EN + TR), matching this project's own established scope
+  // for free-text content heuristics (see SELLER_BADGE_RE/SHIPPING_LABEL_RE
+  // in content/autodetect.js). Anchored ^...$ against the WHOLE
+  // (trimmed) value — a real shop name that happens to CONTAIN one of
+  // these words as part of a longer, distinctive name (e.g. a shop
+  // legitimately named "The Corner Shop") is never rejected, only a
+  // value that IS, in its entirety, one of these generic labels.
+  var SELLER_BOILERPLATE_RE = /^(?:ads?\s+by\b.*|sponsored(?:\s+listing)?|advertisement|promoted(?:\s+listing)?|verified\s*seller|official\s*store|top\s*rated\s*seller|star\s*seller|reklam(?:\s*veren)?|(?:seller|store|shop|vendor|satıcı|mağaza|dükkan))$/i;
+
+  /** Mission spec: "Improve seller extraction/validation so generic
+   * labels are rejected... Do not fabricate a seller name when one
+   * cannot be reliably extracted. Leave it empty instead." Never edits a
+   * value — only says whether the WHOLE trimmed value is nothing but a
+   * generic marketplace/ad label, so the caller can blank it. */
+  function isGenericSellerLabel(text) {
+    if (isBlank(text)) return false;
+    return SELLER_BOILERPLATE_RE.test(String(text).trim());
+  }
+
+  /** Always-on data-integrity pass (mission section 5/8) — distinct from
+   * the opt-in-by-value cleanerType system above: these are correctness
+   * fixes for objectively wrong data, not a "cleaning style" choice, so
+   * (like content/autodetect.js's Title-contamination fix) they apply
+   * unconditionally, never gated behind any per-column setting a user
+   * could accidentally leave off. Runs AFTER cleanerType cleaning (real
+   * or inferred) has already collapsed any duplicated-representation
+   * price text, so the numeric comparison below compares genuinely
+   * cleaned values. Never mutates in place — returns a fresh array of
+   * fresh row clones, matching every other stage in this pipeline's own
+   * non-destructive contract.
+   *
+   *  1. OLD PRICE == CURRENT PRICE on the same row -> blank the old
+   *     price (mission: "Do not duplicate the current price into OLD
+   *     PRICE. If no old price exists, leave it empty.") Only acts when
+   *     BOTH a confident current-price and a confident old-price column
+   *     can be identified by name (first match of each, deterministic
+   *     column order) and both values parse to the SAME numeric amount —
+   *     never guesses when either column is ambiguous or absent.
+   *  2. Any column whose name suggests a seller/shop -> blank a value
+   *     that is nothing but generic ad/marketplace boilerplate.
+   */
+  function applySemanticIntegrityFixes(rows, columns) {
+    if (!rows || !rows.length || !columns || !columns.length) return rows;
+
+    var currentPriceCol = null, oldPriceCol = null;
+    var sellerColIds = [];
+    columns.forEach(function (c) {
+      if (!currentPriceCol && isCurrentPriceColumnName(c.name)) currentPriceCol = c;
+      if (!oldPriceCol && isOldPriceColumnName(c.name)) oldPriceCol = c;
+      if (isSellerColumnName(c.name)) sellerColIds.push(c.id);
+    });
+
+    if (!oldPriceCol && !sellerColIds.length) return rows; // nothing this pass can ever act on — no-op, unchanged rows
+
+    return rows.map(function (row) {
+      var clone = Object.assign({}, row);
+      if (oldPriceCol && currentPriceCol) {
+        try {
+          var oldVal = priceNumericValue(clone[oldPriceCol.id]);
+          var curVal = priceNumericValue(clone[currentPriceCol.id]);
+          if (oldVal !== null && curVal !== null && Math.abs(oldVal - curVal) <= 0.001) {
+            clone[oldPriceCol.id] = '';
+          }
+        } catch (e) { /* never let one bad row break the rest (spec #25 precedent) */ }
+      }
+      sellerColIds.forEach(function (id) {
+        try {
+          if (isGenericSellerLabel(clone[id])) clone[id] = '';
+        } catch (e) { /* keep original on any unexpected error */ }
+      });
+      return clone;
+    });
   }
 
   // ---- dispatcher ------------------------------------------------------
@@ -300,6 +479,10 @@
     cleanText: cleanText,
     cleanPrice: cleanPrice,
     cleanNumber: cleanNumber,
-    cleanUrl: cleanUrl
+    cleanUrl: cleanUrl,
+    priceNumericValue: priceNumericValue,
+    inferCleanerType: inferCleanerType,
+    isGenericSellerLabel: isGenericSellerLabel,
+    applySemanticIntegrityFixes: applySemanticIntegrityFixes
   };
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : globalThis));
