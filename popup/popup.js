@@ -140,6 +140,27 @@
     sessionDiagCopyBtn: document.getElementById('session-diag-copy-btn'),
     sessionDiagStatus: document.getElementById('session-diag-status'),
     sessionDiagTextarea: document.getElementById('session-diag-textarea'),
+    paginationDiagPanel: document.getElementById('pagination-diag-panel'),
+    paginationDiagCopyBtn: document.getElementById('pagination-diag-copy-btn'),
+    paginationDiagStatus: document.getElementById('pagination-diag-status'),
+    paginationDiagTextarea: document.getElementById('pagination-diag-textarea'),
+    healthCheckPanel: document.getElementById('health-check-panel'),
+    healthCheckRunBtn: document.getElementById('health-check-run-btn'),
+    healthCheckOverall: document.getElementById('health-check-overall'),
+    healthCheckMain: document.getElementById('health-check-main'),
+    healthCheckPagination: document.getElementById('health-check-pagination'),
+    healthCheckUiSync: document.getElementById('health-check-ui-sync'),
+    healthCheckStorage: document.getElementById('health-check-storage'),
+    healthCheckDetail: document.getElementById('health-check-detail'),
+    healthCheckLastProgress: document.getElementById('health-check-last-progress'),
+    healthCheckCurrentPage: document.getElementById('health-check-current-page'),
+    healthCheckResultCount: document.getElementById('health-check-result-count'),
+    healthCheckLastIssue: document.getElementById('health-check-last-issue'),
+    healthCheckCopyReportBtn: document.getElementById('health-check-copy-report-btn'),
+    healthCheckCopyHistoryBtn: document.getElementById('health-check-copy-history-btn'),
+    healthCheckClearBtn: document.getElementById('health-check-clear-btn'),
+    healthCheckStatus: document.getElementById('health-check-status'),
+    healthCheckTextarea: document.getElementById('health-check-textarea'),
     resultsNextActions: document.getElementById('results-next-actions'),
     resultsExportDataBtn: document.getElementById('results-export-data-btn'),
     monitorBackToResultsBtn: document.getElementById('monitor-back-to-results-btn'),
@@ -435,6 +456,68 @@
     dsRetryFailedBtn: document.getElementById('ds-retry-failed-btn'),
     dsSummaryText: document.getElementById('ds-summary-text'),
 
+    // DETAIL ENRICHMENT mission (VERİ | SONUÇ | DETAY) — a new, separate
+    // tab/panel; see popup.html's own header comment on this block for
+    // why it duplicates rather than reuses the V1.18 Deep Scraping
+    // element ids directly above.
+    detayTabBtn: document.getElementById('detay-tab-btn'),
+    detayEmpty: document.getElementById('detay-empty'),
+    detayBody: document.getElementById('detay-body'),
+    dtSetupSection: document.getElementById('dt-setup-section'),
+    dtSourceColumn: document.getElementById('dt-source-column'),
+    dtNoLinkColumn: document.getElementById('dt-no-link-column'),
+    dtFieldsList: document.getElementById('dt-fields-list'),
+    dtFieldsEmpty: document.getElementById('dt-fields-empty'),
+    dtPickFieldsBtn: document.getElementById('dt-pick-fields-btn'),
+    detailPickDiagPanel: document.getElementById('detail-pick-diag-panel'),
+    detailPickDiagCopyBtn: document.getElementById('detail-pick-diag-copy-btn'),
+    detailPickDiagStatus: document.getElementById('detail-pick-diag-status'),
+    detailPickDiagTextarea: document.getElementById('detail-pick-diag-textarea'),
+    dtAddFieldBtn: document.getElementById('dt-add-field-btn'),
+    dtAddFieldForm: document.getElementById('dt-add-field-form'),
+    dtFieldName: document.getElementById('dt-field-name'),
+    dtFieldSelector: document.getElementById('dt-field-selector'),
+    dtFieldAttribute: document.getElementById('dt-field-attribute'),
+    dtFieldAttrNameRow: document.getElementById('dt-field-attrname-row'),
+    dtFieldAttrName: document.getElementById('dt-field-attrname'),
+    dtFieldMultiple: document.getElementById('dt-field-multiple'),
+    dtFieldSaveBtn: document.getElementById('dt-field-save-btn'),
+    dtFieldCancelBtn: document.getElementById('dt-field-cancel-btn'),
+    dtTestBtn: document.getElementById('dt-test-btn'),
+    dtTestResults: document.getElementById('dt-test-results'),
+    dtSaveTemplateBtn: document.getElementById('dt-save-template-btn'),
+    dtTemplateSelect: document.getElementById('dt-template-select'),
+    dtTemplatesEmpty: document.getElementById('dt-templates-empty'),
+    dtLoadTemplateBtn: document.getElementById('dt-load-template-btn'),
+    dtDeleteTemplateBtn: document.getElementById('dt-delete-template-btn'),
+    dtScopeAllBtn: document.getElementById('dt-scope-all-btn'),
+    dtScopeFirst100Btn: document.getElementById('dt-scope-first100-btn'),
+    dtScopeFirst500Btn: document.getElementById('dt-scope-first500-btn'),
+    dtScopeFirstNBtn: document.getElementById('dt-scope-firstn-btn'),
+    dtScopeSelectedBtn: document.getElementById('dt-scope-selected-btn'),
+    dtScopeFirstNRow: document.getElementById('dt-scope-firstn-row'),
+    dtScopeFirstNInput: document.getElementById('dt-scope-firstn-input'),
+    dtScopeSelectedRow: document.getElementById('dt-scope-selected-row'),
+    dtSelectAllBtn: document.getElementById('dt-select-all-btn'),
+    dtClearSelectionBtn: document.getElementById('dt-clear-selection-btn'),
+    dtSelectionCount: document.getElementById('dt-selection-count'),
+    dtRecordsTableWrap: document.getElementById('dt-records-table-wrap'),
+    dtRecordsTable: document.getElementById('dt-records-table'),
+    dtWorkloadSummary: document.getElementById('dt-workload-summary'),
+    dtScopeError: document.getElementById('dt-scope-error'),
+    dtStartBtn: document.getElementById('dt-start-btn'),
+    dtProgressSection: document.getElementById('dt-progress-section'),
+    dtProgressBadge: document.getElementById('dt-progress-badge'),
+    dtProgressText: document.getElementById('dt-progress-text'),
+    dtProgressCurrent: document.getElementById('dt-progress-current'),
+    dtRetryStatus: document.getElementById('dt-retry-status'),
+    dtStopBtn: document.getElementById('dt-stop-btn'),
+    dtResumeBtn: document.getElementById('dt-resume-btn'),
+    dtRetryFailedBtn: document.getElementById('dt-retry-failed-btn'),
+    dtNewRunBtn: document.getElementById('dt-new-run-btn'),
+    dtResetBtn: document.getElementById('dt-reset-btn'),
+    dtSummaryText: document.getElementById('dt-summary-text'),
+
     changesSection: document.getElementById('changes-section'),
     changesBackBtn: document.getElementById('changes-back-btn'),
     changesSummaryText: document.getElementById('changes-summary-text'),
@@ -603,6 +686,13 @@
   // ws_live_session::<hostname> below) — null when no session exists yet.
   var activeLiveSession = null;
   var liveSessionListenerAttached = false;
+  // SELF-DIAGNOSTICS / HEALTH CHECK mission — the honest "what did the
+  // popup actually last render" snapshot, updated at the exact point
+  // renderDiscoveryUI() sets the real status-line text (below). Deliberately
+  // NOT re-derived by re-parsing DOM text later (fragile, locale-
+  // dependent) — this is the single source of truth the Health Check's
+  // UI<->engine consistency rules compare against.
+  var lastRenderedDiscoverySnapshot = null;
   // Populated once per BAŞLA click by handleStartLiveSession(), read by
   // formatSessionDiagnosticReport()'s "SESSION STORAGE" section. Exists
   // purely so the dev diagnostic can prove the write actually happened
@@ -835,6 +925,14 @@
     // silently linger with stale/misaligned values.
     deepScrapeColumns = [];
     if (els.dsProgressSection) els.dsProgressSection.hidden = true;
+    // DETAIL ENRICHMENT mission: same reasoning as deepScrapeColumns
+    // directly above, for the new DETAY tab's own merged columns/run —
+    // a fresh dataset invalidates any previously-merged detail values
+    // AND any in-flight progress display tied to the OLD dataset's rows.
+    detailColumns = [];
+    currentDetailRunId = null;
+    if (els.dtProgressSection) els.dtProgressSection.hidden = true;
+    if (els.dtSetupSection) els.dtSetupSection.hidden = false;
     els.previewSection.hidden = true;
     els.filterPanel.hidden = true;
     els.sortPanel.hidden = true;
@@ -847,6 +945,7 @@
     updateScrapeWorkflowStatus();
     updateResultsEmptyState();
     updateResearchTabState();
+    updateDetailTabAvailability();
   }
 
   // =====================================================================
@@ -1798,6 +1897,363 @@
     }
   }
 
+  /** DEV ONLY — same reachability contract as revealSessionDiagPanelIfDev()
+   * above. [WS-PAGE-DIAG] TEMPORARY: real production report — main
+   * discovery stalling on page 11, the page's own DevTools console
+   * destroyed on every real pagination navigation. */
+  async function revealPaginationDiagPanelIfDev() {
+    if (!els.paginationDiagPanel) return;
+    var isDev = false;
+    try { isDev = await WSLicense.isDevelopmentInstall(); } catch (e) { isDev = false; }
+    els.paginationDiagPanel.hidden = !isDev;
+  }
+
+  /** Formats content/discovery.js's own persistent ws_pagination_diag
+   * ring buffer (chrome.storage.local, capped at 100 compact entries,
+   * survives real navigation unlike the console) — read DIRECTLY from
+   * storage via localGet(), never through the content script, so this
+   * works even if the tab that produced the entries has since navigated
+   * away or the content script isn't currently reachable. */
+  function formatPaginationDiagnosticReport(diag) {
+    var lines = [];
+    lines.push('=== Pagination Diagnostic ===');
+    lines.push('Generated: ' + new Date().toISOString());
+    lines.push('Extension version: ' + (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '?'));
+    lines.push('');
+    var entries = (diag && diag.entries) || [];
+    if (!entries.length) {
+      lines.push('No pagination diagnostic entries recorded yet — start a scrape and let discovery run first.');
+      return lines.join('\n');
+    }
+    lines.push('Entries: ' + entries.length + ' (ring buffer caps at 100 — oldest dropped first)');
+    lines.push('');
+    entries.forEach(function (e, i) {
+      var head = '#' + (i + 1) + ' [' + new Date(e.t).toISOString() + '] stage=' + e.stage +
+        ' page=' + (e.page == null ? '?' : e.page) + ' discoveryStatus=' + (e.discoveryStatus || '?');
+      if (e.reason) head += ' reason=' + e.reason;
+      lines.push(head);
+      lines.push('    url=' + e.url);
+      if (e.attempt) lines.push('    attempt=' + JSON.stringify(e.attempt));
+    });
+    return lines.join('\n');
+  }
+
+  async function handleCopyPaginationDiagnostic() {
+    if (els.paginationDiagStatus) els.paginationDiagStatus.textContent = 'Reading pagination diagnostic buffer…';
+    if (els.paginationDiagTextarea) els.paginationDiagTextarea.hidden = true;
+    var diag;
+    try {
+      diag = await localGet('ws_pagination_diag');
+    } catch (e) {
+      if (els.paginationDiagStatus) els.paginationDiagStatus.textContent = 'Diagnostic failed: ' + (e && e.message || e);
+      return;
+    }
+    var text = formatPaginationDiagnosticReport(diag);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (els.paginationDiagStatus) els.paginationDiagStatus.textContent = 'Copied to clipboard (' + text.length + ' characters). Paste it back.';
+    } catch (e) {
+      if (els.paginationDiagStatus) els.paginationDiagStatus.textContent = 'Clipboard unavailable — select all the text below and copy it manually.';
+      if (els.paginationDiagTextarea) {
+        els.paginationDiagTextarea.hidden = false;
+        els.paginationDiagTextarea.value = text;
+        els.paginationDiagTextarea.focus();
+        els.paginationDiagTextarea.select();
+      }
+    }
+  }
+
+  // ================= SELF-DIAGNOSTICS / HEALTH CHECK ("Sağlık Kontrolü") =================
+  // Dev-only observability layer over the FULL main-scrape/Detail
+  // lifecycle — never mutates/resets/restarts anything (diagnoses only).
+  // Reuses rather than duplicates: content/discovery.js's own
+  // ws_pagination_diag ring buffer (per-page discovery detail, unchanged)
+  // and utils/healthdiag.js's ws_health_diag buffer (start-flow + Detail
+  // lifecycle events, pushed from this file and background.js) are BOTH
+  // read here and merged into one report — see gatherHealthCheckInput().
+  // The actual HEALTHY/WARNING/STALLED/FAILED rules live in the pure,
+  // chrome-free utils/healthcheck.js (WSHealthCheck.computeHealthSummary)
+  // — this section's only job is gathering the facts that function needs.
+
+  function getBytesInUseAsync(keys) {
+    return new Promise(function (resolve) {
+      try { chrome.storage.local.getBytesInUse(keys === undefined ? null : keys, function (n) { resolve(n || 0); }); }
+      catch (e) { resolve(0); }
+    });
+  }
+
+  // A 'storage-quota-error' diagnostic event only counts toward FAILED
+  // while reasonably fresh — an old, since-recovered-from quota bump from
+  // an hour ago must not permanently pin the overall verdict at FAILED.
+  var HEALTH_QUOTA_ERROR_RECENCY_MS = 120000;
+
+  /** Gathers every fact WSHealthCheck.computeHealthSummary() needs, from
+   * the real, current state of every relevant context. Read-only —
+   * touches no scraper/session/license/settings data, only reads it. */
+  async function gatherHealthCheckInput() {
+    var now = Date.now();
+    var mainSession = null;
+    try { mainSession = hostname ? await liveSessionGet(hostname) : null; } catch (e) { mainSession = null; }
+
+    // uiState deliberately compares the popup's own IN-MEMORY
+    // activeLiveSession/lastRenderedDiscoverySnapshot (what was actually
+    // last rendered on screen) against the freshly-read mainSession above
+    // (real current engine/storage truth) — a genuine, non-trivial
+    // consistency check, not a comparison against itself.
+    var uiState = lastRenderedDiscoverySnapshot ? {
+      visiblePagesVisited: lastRenderedDiscoverySnapshot.visiblePagesVisited,
+      visibleResultCount: activeLiveSession ? activeLiveSession.rows.length : null,
+      isRunningInUI: lastRenderedDiscoverySnapshot.isRunningInUI,
+      isCompletedInUI: lastRenderedDiscoverySnapshot.isCompletedInUI
+    } : null;
+
+    // ---- STORAGE HEALTH ----
+    var bytesInUse = 0, quotaBytes = 10 * 1024 * 1024, allData = {};
+    try { bytesInUse = await getBytesInUseAsync(null); } catch (e) { bytesInUse = 0; }
+    try { if (chrome.storage.local.QUOTA_BYTES) quotaBytes = chrome.storage.local.QUOTA_BYTES; } catch (e) { /* fallback stays */ }
+    try { allData = await new Promise(function (resolve) { chrome.storage.local.get(null, function (r) { resolve(r || {}); }); }); } catch (e) { allData = {}; }
+    var keySizes = Object.keys(allData).map(function (k) { return { key: k, bytes: estimateStoredByteSize(allData[k]) }; }).sort(function (a, b) { return b.bytes - a.bytes; });
+    var largestKeys = keySizes.slice(0, 8);
+
+    // ---- Merged diagnostic event buffers ----
+    var healthDiagBuffer = { entries: [] };
+    try { if (typeof WSHealthDiag !== 'undefined') healthDiagBuffer = await WSHealthDiag.getBuffer(); } catch (e) { /* best-effort */ }
+    var paginationDiagBuffer = null;
+    try { paginationDiagBuffer = await localGet('ws_pagination_diag'); } catch (e) { paginationDiagBuffer = null; }
+
+    var quotaErrorEvent = (healthDiagBuffer.entries || []).slice().reverse().filter(function (e) { return e.stage === 'storage-quota-error'; })[0] || null;
+    var quotaErrorDetected = !!(quotaErrorEvent && (now - quotaErrorEvent.t) <= HEALTH_QUOTA_ERROR_RECENCY_MS);
+
+    // ---- DETAIL ENRICHMENT ----
+    var deepScrapeState = null, deepScrapeFields = null;
+    try { deepScrapeState = await localGet('ws_deepscrape_run'); } catch (e) { deepScrapeState = null; }
+    try { deepScrapeFields = await localGet('ws_deepscrape_fields'); } catch (e) { deepScrapeFields = null; }
+    var detail = null;
+    if (deepScrapeState) {
+      var counts = deepScrapeState.counts || {};
+      detail = {
+        status: deepScrapeState.status, total: counts.total, completed: counts.completed,
+        pending: counts.pending, error: counts.failed, timeouts: counts.timeouts,
+        workerActive: deepScrapeState.status === 'running' && !!deepScrapeState.currentUrl,
+        currentUrl: deepScrapeState.currentUrl,
+        // A proxy for "queue position advancing" without needing a
+        // separately-tracked previousUrl — any non-null value here means
+        // the worker is genuinely mid-record, which is exactly what the
+        // detail-freeze rule needs to know.
+        currentIndex: deepScrapeState.currentUrl ? ((counts.completed || 0) + (counts.failed || 0) + (counts.partial || 0) + (counts.skipped || 0)) : null,
+        lastProgressAt: deepScrapeState.updatedAt,
+        runBytes: estimateStoredByteSize(deepScrapeState),
+        fieldsBytes: deepScrapeFields ? estimateStoredByteSize(deepScrapeFields) : 0
+      };
+    }
+
+    var snapshotsRaw = null;
+    try { snapshotsRaw = await localGet('ws_snapshots'); } catch (e) { snapshotsRaw = null; }
+
+    return {
+      now: now,
+      mainSession: mainSession,
+      uiState: uiState,
+      storage: {
+        bytesInUse: bytesInUse, quotaBytes: quotaBytes,
+        quotaErrorDetected: quotaErrorDetected, quotaErrorAt: quotaErrorEvent ? quotaErrorEvent.t : null,
+        largestKeys: largestKeys,
+        liveSessionBytes: mainSession ? estimateStoredByteSize(mainSession) : 0,
+        deepScrapeRunBytes: deepScrapeState ? estimateStoredByteSize(deepScrapeState) : 0,
+        deepScrapeFieldsBytes: deepScrapeFields ? estimateStoredByteSize(deepScrapeFields) : 0,
+        snapshotsBytes: snapshotsRaw ? estimateStoredByteSize(snapshotsRaw) : 0
+      },
+      detail: detail,
+      healthDiagBuffer: healthDiagBuffer,
+      paginationDiagBuffer: paginationDiagBuffer
+    };
+  }
+
+  async function computeAndRenderHealthCheck() {
+    if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Running health check…';
+    var input = await gatherHealthCheckInput();
+    // BUG #1 diagnosis requirement — classifyStalledStage() (inside
+    // computeHealthSummary) needs the merged, chronologically-sorted
+    // event list to determine WHICH internal discovery stage looks
+    // stuck (auto-scroll/load-more/next-page-detection/navigation/
+    // reinjection-bootstrap/etc.) — computed once here, reused by
+    // handleCopyHealthReport() below via the same input object shape.
+    input.diagEvents = mergedDiagEvents(input);
+    var summary = WSHealthCheck.computeHealthSummary(input);
+    if (els.healthCheckOverall) els.healthCheckOverall.textContent = summary.overall + ' — ' + summary.overallReason;
+    if (els.healthCheckMain) els.healthCheckMain.textContent = summary.mainMessage;
+    if (els.healthCheckPagination) els.healthCheckPagination.textContent = summary.paginationMessage;
+    if (els.healthCheckUiSync) els.healthCheckUiSync.textContent = summary.uiSyncMessage;
+    if (els.healthCheckStorage) els.healthCheckStorage.textContent = summary.storageMessage;
+    if (els.healthCheckDetail) els.healthCheckDetail.textContent = summary.detailMessage;
+    if (els.healthCheckLastProgress) els.healthCheckLastProgress.textContent = summary.lastProgressAt ? new Date(summary.lastProgressAt).toLocaleTimeString() : '—';
+    if (els.healthCheckCurrentPage) els.healthCheckCurrentPage.textContent = summary.currentPage != null ? String(summary.currentPage) : '—';
+    if (els.healthCheckResultCount) els.healthCheckResultCount.textContent = summary.resultCount != null ? String(summary.resultCount) : '—';
+    if (els.healthCheckLastIssue) els.healthCheckLastIssue.textContent = summary.lastError || '—';
+    if (els.healthCheckStatus) els.healthCheckStatus.textContent = '';
+    return { summary: summary, input: input };
+  }
+
+  /** "Raporu Kopyala" — mission section 10's exact required sections. */
+  function formatHealthReport(summary, input) {
+    var lines = [];
+    lines.push('=== ClickScrape Health Check Report ===');
+    lines.push('Generated: ' + new Date(input.now).toISOString());
+    lines.push('Extension version: ' + (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '?'));
+    lines.push('Hostname: ' + (hostname || '?'));
+    lines.push('');
+    lines.push('OVERALL: ' + summary.overall + ' — ' + summary.overallReason);
+    lines.push('');
+    lines.push('-- Main scrape --');
+    if (input.mainSession) {
+      lines.push('sessionId: ' + input.mainSession.sessionId);
+      lines.push('session.status: ' + input.mainSession.status);
+      lines.push('resultCount: ' + (summary.resultCount == null ? '?' : summary.resultCount));
+      lines.push('pagesVisited: ' + (summary.pagesVisited == null ? '?' : summary.pagesVisited));
+      var d = input.mainSession.discovery;
+      lines.push('discovery.status: ' + (d ? d.status : '(no discovery on this session)'));
+      if (d) lines.push('lastPaginationAttempt: ' + JSON.stringify(d.lastPaginationAttempt));
+      // BUG #1 diagnosis requirement — ground-truth engine sub-state,
+      // direct from the session object (not inferred from the event
+      // tail): immediately shows whether Auto Scroll or Load More is
+      // actively cycling (status:'running', a growing cycleCount/
+      // clickCount) vs. already exhausted, which is exactly what
+      // distinguishes "stuck inside Auto Scroll" from "stuck at
+      // next-page detection/navigation AFTER both already exhausted."
+      if (input.mainSession.autoScroll) {
+        var as = input.mainSession.autoScroll;
+        lines.push('autoScroll: status=' + as.status + ' stopReason=' + as.stopReason + ' cycleCount=' + as.cycleCount);
+      }
+      if (input.mainSession.loadMoreAuto) {
+        var lm = input.mainSession.loadMoreAuto;
+        lines.push('loadMoreAuto: status=' + lm.status + ' stopReason=' + lm.stopReason + ' clickCount=' + lm.clickCount);
+      }
+    } else {
+      lines.push('(no active main scrape session for this hostname)');
+    }
+    lines.push('mainStatus: ' + summary.mainStatus + ' — ' + summary.mainMessage);
+    if (summary.stalledStageGuess) {
+      lines.push('LIKELY STALLED STAGE: ' + summary.stalledStageGuess.stage + ' — ' + summary.stalledStageGuess.detail);
+    }
+    lines.push('');
+    lines.push('-- UI <-> engine consistency --');
+    lines.push(summary.uiSyncStatus + ' — ' + summary.uiSyncMessage);
+    if (input.uiState) lines.push('uiState (last rendered): ' + JSON.stringify(input.uiState));
+    lines.push('');
+    lines.push('-- Storage --');
+    lines.push(summary.storageStatus + ' — ' + summary.storageMessage);
+    lines.push('bytesInUse: ' + input.storage.bytesInUse + ' / quotaBytes: ' + input.storage.quotaBytes);
+    lines.push('ws_live_session bytes: ' + input.storage.liveSessionBytes);
+    lines.push('ws_deepscrape_run bytes: ' + input.storage.deepScrapeRunBytes);
+    lines.push('ws_deepscrape_fields bytes: ' + input.storage.deepScrapeFieldsBytes);
+    lines.push('ws_snapshots bytes: ' + input.storage.snapshotsBytes);
+    lines.push('Largest diagnostic-relevant keys:');
+    (input.storage.largestKeys || []).forEach(function (k) { lines.push('  ' + k.key + ': ' + k.bytes + ' bytes'); });
+    lines.push('');
+    lines.push('-- Detail Enrichment --');
+    lines.push(summary.detailStatus + ' — ' + summary.detailMessage);
+    if (input.detail) lines.push('detail: ' + JSON.stringify(input.detail));
+    lines.push('');
+    lines.push('-- Detected health issues --');
+    if (summary.reasons.length) {
+      summary.reasons.forEach(function (r) { lines.push(r.severity + ' [' + r.code + ']: ' + r.message); });
+    } else {
+      lines.push('(none)');
+    }
+    lines.push('');
+    lines.push('-- Last 20 diagnostic events --');
+    mergedDiagEvents(input).slice(-20).forEach(function (e) {
+      lines.push('[' + new Date(e.t).toISOString() + '] (' + e.scope + ') ' + e.stage + (e.data ? ' ' + JSON.stringify(e.data) : ''));
+    });
+    return lines.join('\n');
+  }
+
+  /** Merges ws_health_diag (both scopes) + ws_pagination_diag into one
+   * chronological event list — the single unification point requirement
+   * 11 asks for ("do not create conflicting duplicate systems"). */
+  function mergedDiagEvents(input) {
+    var health = ((input.healthDiagBuffer && input.healthDiagBuffer.entries) || []);
+    var pagination = ((input.paginationDiagBuffer && input.paginationDiagBuffer.entries) || []).map(function (e) {
+      return { t: e.t, scope: 'pagination', stage: e.stage, data: { page: e.page, discoveryStatus: e.discoveryStatus, reason: e.reason, attempt: e.attempt } };
+    });
+    return health.concat(pagination).sort(function (a, b) { return a.t - b.t; });
+  }
+
+  /** "Tanılama Geçmişini Kopyala" — the FULL merged diagnostic history
+   * (not just the last 20 the report includes). */
+  function formatHealthDiagnosticHistory(input) {
+    var lines = [];
+    lines.push('=== ClickScrape Diagnostic History ===');
+    lines.push('Generated: ' + new Date(input.now).toISOString());
+    var merged = mergedDiagEvents(input);
+    lines.push('Total events: ' + merged.length);
+    lines.push('');
+    merged.forEach(function (e) {
+      lines.push('[' + new Date(e.t).toISOString() + '] (' + e.scope + ') ' + e.stage + (e.data ? ' ' + JSON.stringify(e.data) : ''));
+    });
+    return lines.join('\n');
+  }
+
+  async function handleCopyHealthReport() {
+    if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Building report…';
+    if (els.healthCheckTextarea) els.healthCheckTextarea.hidden = true;
+    var input = await gatherHealthCheckInput();
+    input.diagEvents = mergedDiagEvents(input);
+    var summary = WSHealthCheck.computeHealthSummary(input);
+    var text = formatHealthReport(summary, input);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Copied to clipboard (' + text.length + ' characters). Paste it back.';
+    } catch (e) {
+      if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Clipboard unavailable — select all the text below and copy it manually.';
+      if (els.healthCheckTextarea) { els.healthCheckTextarea.hidden = false; els.healthCheckTextarea.value = text; els.healthCheckTextarea.focus(); els.healthCheckTextarea.select(); }
+    }
+  }
+
+  async function handleCopyHealthHistory() {
+    if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Reading diagnostic history…';
+    if (els.healthCheckTextarea) els.healthCheckTextarea.hidden = true;
+    var input = await gatherHealthCheckInput();
+    var text = formatHealthDiagnosticHistory(input);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Copied to clipboard (' + text.length + ' characters). Paste it back.';
+    } catch (e) {
+      if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Clipboard unavailable — select all the text below and copy it manually.';
+      if (els.healthCheckTextarea) { els.healthCheckTextarea.hidden = false; els.healthCheckTextarea.value = text; els.healthCheckTextarea.focus(); els.healthCheckTextarea.select(); }
+    }
+  }
+
+  /** "Tanılamayı Temizle" — clears ONLY diagnostic logs (both ws_health_diag
+   * scopes + ws_pagination_diag), NEVER scraper/user data. No confirmation
+   * needed (unlike Detail's own "Sıfırla") — this dev tool never touches
+   * any real scrape/session/license/settings data, only its own
+   * diagnostic buffers (mission section 9's own explicit requirement). */
+  async function handleClearHealthDiagnostics() {
+    if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Clearing diagnostics…';
+    try {
+      if (typeof WSHealthDiag !== 'undefined') { await WSHealthDiag.clearScope('main'); await WSHealthDiag.clearScope('detail'); }
+    } catch (e) { /* best-effort */ }
+    try {
+      var data = {}; data['ws_pagination_diag'] = { schemaVersion: 1, entries: [] };
+      await new Promise(function (resolve) { chrome.storage.local.set(data, resolve); });
+    } catch (e) { /* best-effort */ }
+    if (els.healthCheckStatus) els.healthCheckStatus.textContent = 'Diagnostics cleared.';
+    await computeAndRenderHealthCheck();
+  }
+
+  /** DEV ONLY — same reachability contract as revealSessionDiagPanelIfDev()/
+   * revealPaginationDiagPanelIfDev() above. */
+  async function revealHealthCheckPanelIfDev() {
+    if (!els.healthCheckPanel) return;
+    var isDev = false;
+    try { isDev = await WSLicense.isDevelopmentInstall(); } catch (e) { isDev = false; }
+    els.healthCheckPanel.hidden = !isDev;
+    if (!isDev) return;
+    try { await computeAndRenderHealthCheck(); } catch (e) { /* best-effort initial render */ }
+  }
+  // ================= END SELF-DIAGNOSTICS / HEALTH CHECK =================
+
   /** V1 UX WORKFLOW SIMPLIFICATION spec: the Extract button shows the live
    * accepted item count ("60 Items") instead of a generic "Extract Data"
    * label, so the primary CTA itself communicates what it's about to do.
@@ -1961,6 +2417,69 @@
   // to observe.
   function liveSessionKey(host) { return LIVE_SESSION_KEY_PREFIX + WSRunState.normalizeHostname(host); }
 
+  // =====================================================================
+  // STORAGE-QUOTA SAFETY (real production report, real Chrome console
+  // trace): chargeRunCredit()'s own tiny ws_license write threw
+  // "Resource::kQuotaBytes quota exceeded" AFTER a successful extraction
+  // (64 real rows), crashing the rest of handleStartLiveSession() as an
+  // unhandled rejection — session creation/persist/START_LIVE_WATCH/
+  // START_DISCOVERY never ran, and the UI stayed frozen at "Veri
+  // işleniyor…" forever. chrome.storage.local's quota is a TOTAL across
+  // every key this extension owns, not per-write — a few-hundred-byte
+  // ws_license write can fail purely because OTHER keys (most likely:
+  // accumulated ws_live_session::<hostname> entries, each holding a full
+  // rows array that can grow into the thousands via the Automatic
+  // Discovery Engine, and NEVER cleaned up once a session is finished)
+  // already fill it. license.js's own write stays untouched — it is
+  // already small and isolated (schemaVersion/licenseStatus/
+  // trialRunsUsed/a length-capped chargedRunIds ledger/etc.), confirmed
+  // by inspection, not the cause.
+  //
+  // reclaimObsoleteLiveSessionStorage() frees ONLY the single safest
+  // category of "provably obsolete" data this file can identify on its
+  // own: a ws_live_session::<hostname> entry already marked
+  // status:'finished' (the user already clicked BİTİR — a real, final,
+  // no-longer-active state — for a hostname OTHER than the one currently
+  // starting a new run). It NEVER touches: an 'active' session for any
+  // host (may still be genuinely in use), the CURRENT hostname's own
+  // session (that is the active/current run this exact BAŞLA click is
+  // building — left completely alone here; it gets legitimately
+  // overwritten a few statements later in the normal flow, not deleted
+  // by this), ws_deepscrape_run (Detail Enrichment — explicitly out of
+  // this mission's scope), ws_run::* (legacy Auto Next/Multi-page
+  // pagination run state — explicitly out of scope), or ws_license
+  // itself. Best-effort only: any failure here is swallowed, never
+  // thrown — this is a bonus reclaim attempt, never a required step.
+  function estimateStoredByteSize(value) {
+    try { return JSON.stringify(value).length; } catch (e) { return 0; }
+  }
+
+  async function reclaimObsoleteLiveSessionStorage(currentHostnameNormalized) {
+    var removedKeys = [];
+    var freedBytes = 0;
+    try {
+      var all = await new Promise(function (resolve) { chrome.storage.local.get(null, resolve); });
+      var candidates = Object.keys(all)
+        .filter(function (k) { return k.indexOf(LIVE_SESSION_KEY_PREFIX) === 0; })
+        .filter(function (k) {
+          var s = all[k];
+          var keyHostname = k.slice(LIVE_SESSION_KEY_PREFIX.length);
+          return s && s.status === 'finished' && keyHostname !== currentHostnameNormalized;
+        })
+        .map(function (k) { return { key: k, size: estimateStoredByteSize(all[k]) }; })
+        .sort(function (a, b) { return b.size - a.size; }); // largest first — free the most space per key removed
+      for (var i = 0; i < candidates.length; i++) {
+        await new Promise(function (resolve) { chrome.storage.local.remove(candidates[i].key, resolve); });
+        removedKeys.push(candidates[i].key);
+        freedBytes += candidates[i].size;
+      }
+    } catch (e) { /* best-effort only — never let a reclaim failure become a new crash */ }
+    if (removedKeys.length) {
+      console.warn('[Web Scraper] Storage quota relief: removed ' + removedKeys.length + ' obsolete finished session(s), freeing ~' + freedBytes + ' bytes — ' + JSON.stringify(removedKeys));
+    }
+    return { removedKeys: removedKeys, freedBytes: freedBytes };
+  }
+
   // REAL-CHROME ROOT CAUSE #3: chrome.storage.session defaults to
   // TRUSTED_CONTEXTS-only access — content scripts are NOT granted
   // access unless the background service worker explicitly calls
@@ -2068,10 +2587,19 @@
    * to the click as physically possible — everything else (extraction,
    * classification, charging, session creation) follows only after. */
   async function handleStartLiveSession() {
-    if (runTriggerInFlight) return;
+    console.log('[WS-DIAG] STAGE 2: start function entered. runTriggerInFlight=', runTriggerInFlight, 'activeLiveSession=', !!activeLiveSession, 'hostname=', hostname, 'tabId=', tabId);
+    if (runTriggerInFlight) { console.log('[WS-DIAG] STAGE 3: busy guard BLOCKED — runTriggerInFlight was already true, returning immediately'); return; }
+    console.log('[WS-DIAG] STAGE 3: busy guard PASSED — runTriggerInFlight was false, claiming it now');
+    // SELF-DIAGNOSTICS / HEALTH CHECK mission — a genuinely NEW main
+    // scrape gets its own clean 'main'-scope diagnostic trace, same
+    // contract content/discovery.js's ws_pagination_diag already
+    // established. Fire-and-forget, best-effort — never blocks BAŞLA.
+    try { if (typeof WSHealthDiag !== 'undefined') { WSHealthDiag.clearScope('main'); WSHealthDiag.pushEvent('main', 'start-clicked', { hostname: hostname }); } } catch (e) { /* diagnostic-only */ }
     runTriggerInFlight = true;
     try {
+      console.log('[WS-DIAG] STAGE 4/5: no explicit existing-live-session lookup/cleanup exists in this function — activeLiveSession (pre-run)=', JSON.stringify(activeLiveSession && { sessionId: activeLiveSession.sessionId, rows: activeLiveSession.rows && activeLiveSession.rows.length, status: activeLiveSession.status }));
       if (!state.columns.length) {
+        console.log('[WS-DIAG] STOPPED at columns check — state.columns.length is 0');
         setStatus(WSI18n.t('liveSession.noColumns'), true);
         return;
       }
@@ -2084,8 +2612,10 @@
       // regardless of whether this succeeds.
       var crossNavRegistered = false;
       var origin = originPatternForLiveWatch(hostname);
+      console.log('[WS-DIAG] STAGE 6: requesting permission for origin=', origin);
       try {
         var granted = await chrome.permissions.request({ origins: [origin] });
+        console.log('[WS-DIAG] STAGE 6: permission request resolved, granted=', granted);
         if (granted) {
           // REAL-CHROME ROOT CAUSE (found via "Cross-navigation persistence
           // registered: false" in the dev diagnostic, on a real Etsy
@@ -2113,16 +2643,29 @@
             } catch (e2) { crossNavRegistered = false; }
           }
         }
-      } catch (e) { crossNavRegistered = false; }
+      } catch (e) { crossNavRegistered = false; console.log('[WS-DIAG] STAGE 6: permission/registration block THREW:', e && e.message); }
+      console.log('[WS-DIAG] STAGE 6 done: crossNavRegistered=', crossNavRegistered);
+      try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'permissions-resolved', { crossNavRegistered: crossNavRegistered }); } catch (e) { /* diagnostic-only */ }
 
-      if (!(await trialAllowsNewRun())) { showTrialCompleteModal(); return; }
+      console.log('[WS-DIAG] STAGE 6b: checking trialAllowsNewRun()');
+      var trialOk = await trialAllowsNewRun();
+      console.log('[WS-DIAG] STAGE 6b: trialAllowsNewRun() resolved=', trialOk);
+      if (!trialOk) { console.log('[WS-DIAG] STOPPED at trialAllowsNewRun — trial does not allow a new run'); showTrialCompleteModal(); return; }
       setStatus(WSI18n.t('liveSession.starting'), false, 'running');
+      console.log('[WS-DIAG] STAGE 7: active tab resolved (module-level) tabId=', tabId, 'pageUrl=', pageUrl, 'hostname=', hostname);
+      try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'tab-resolved', { tabId: tabId, hostname: hostname }); } catch (e) { /* diagnostic-only */ }
 
       var res;
+      console.log('[WS-DIAG] STAGE 8/9: about to sendToContent RUN_EXTRACTION, tabId=', tabId);
+      try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'run-extraction-sent', { tabId: tabId }); } catch (e) { /* diagnostic-only */ }
       try {
         res = await sendToContent({ type: 'RUN_EXTRACTION' });
-      } catch (e) { res = null; }
+        console.log('[WS-DIAG] STAGE 10: RUN_EXTRACTION response RECEIVED:', JSON.stringify(res && { ok: res.ok, rowCount: res.rows && res.rows.length, error: res.error }));
+        try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'run-extraction-received', { ok: res && res.ok, rowCount: res && res.rows && res.rows.length }); } catch (e2) { /* diagnostic-only */ }
+      } catch (e) { res = null; console.log('[WS-DIAG] STAGE 10: RUN_EXTRACTION threw/rejected:', e && e.message); }
       if (!res || !res.ok) {
+        console.log('[WS-DIAG] STOPPED — RUN_EXTRACTION failed or returned falsy, res=', JSON.stringify(res));
+        try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'stopped', { reason: 'run-extraction-failed' }); } catch (e3) { /* diagnostic-only */ }
         setStatus(WSI18n.t('liveSession.readError'), true);
         return;
       }
@@ -2143,13 +2686,49 @@
         state.containerSelector = containerMigration.migratedContainerSelector;
       }
 
+      console.log('[WS-DIAG] STAGE 10b: classifyAndAccept starting, res.rows.length=', res.rows.length);
       var classifyResult = await classifyAndAccept(state.columns, res.rows);
       rawRows = classifyResult.accepted;
+      console.log('[WS-DIAG] STAGE 10b: classifyAndAccept done, accepted=', classifyResult.accepted.length, 'excluded=', classifyResult.excludedCount);
+      try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'rows-accepted', { accepted: classifyResult.accepted.length, excluded: classifyResult.excludedCount }); } catch (e) { /* diagnostic-only */ }
 
       // The one and only chargeRunCredit call in this entire feature —
       // see the header comment above for why that makes double-charging
       // structurally impossible for everything that follows.
-      await chargeRunCredit('livesession_' + hostname + '_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+      //
+      // BUG FIX — real production report + real Chrome console trace:
+      // "Uncaught (in promise) Error: Resource::kQuotaBytes quota
+      // exceeded at license.js:187" after a genuinely successful
+      // extraction. chargeRunCredit() previously had no try/catch here —
+      // a rejected license-state write (chrome.storage.local's TOTAL
+      // quota exceeded, not this one small write's own size) propagated
+      // straight out of handleStartLiveSession() as an unhandled
+      // rejection, skipping everything after it (session creation,
+      // persist, START_LIVE_WATCH, START_DISCOVERY) and leaving the UI
+      // frozen at "Veri işleniyor…" forever. A license/trial bookkeeping
+      // failure must NEVER be able to do that — the scrape itself
+      // already succeeded and must be allowed to continue regardless.
+      console.log('[WS-DIAG] STAGE 10c: chargeRunCredit starting');
+      var runCreditId = 'livesession_' + hostname + '_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      try {
+        await chargeRunCredit(runCreditId);
+      } catch (e) {
+        console.error('[Web Scraper] chargeRunCredit failed (' + (e && e.message) + ') — attempting a bounded storage-quota reclaim and retrying once; the scrape itself continues either way.');
+        try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'storage-quota-error', { step: 'charge-run-credit' }); } catch (e0) { /* diagnostic-only */ }
+        var reclaimed = await reclaimObsoleteLiveSessionStorage(WSRunState.normalizeHostname(hostname));
+        if (reclaimed.removedKeys.length) {
+          try { await chargeRunCredit(runCreditId); } catch (e2) {
+            console.error('[Web Scraper] chargeRunCredit retry also failed — this run will not be charged, but the scrape continues:', e2 && e2.message);
+          }
+        }
+        // Deliberately no re-throw here in any case: consumeRunCredit()
+        // only ever mutates chrome.storage.local AFTER a successful
+        // persist() (see license.js), so a failed write leaves the real
+        // trial counter untouched in storage — never double-charged,
+        // never silently corrupted, just honestly not-charged this once.
+      }
+      console.log('[WS-DIAG] STAGE 10c: chargeRunCredit done');
+      try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'credit-step-done', {}); } catch (e) { /* diagnostic-only */ }
 
       var dedupeKey = pickDedupeKeyForColumns(state.columns);
       // AUTOMATIC DATA DISCOVERY ENGINE (mission's own central product
@@ -2203,9 +2782,12 @@
       // content/livewatch.js's passive watcher will use for every later
       // pass — guarantees identical identity logic for this first batch
       // and every batch appended after it.
+      console.log('[WS-DIAG] STAGE 11: new session object created, sessionId=', session.sessionId, 'hostname=', session.hostname);
+      try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'session-created', { sessionId: session.sessionId, hostname: session.hostname }); } catch (e) { /* diagnostic-only */ }
       var datasetBefore = session.rows.length;
       var seedMerge = WSRunState.mergeNewRows(session, rawRows, state.columns, { baseUrl: pageUrl });
       session = seedMerge.runState;
+      console.log('[WS-DIAG] STAGE 11b: seedMerge done, session.rows.length=', session.rows.length);
       // Diagnostics (dev-only "Copy Session Diagnostic" reads this) —
       // never trust a count just because extraction completed: the exact
       // raw/accepted/excluded/duplicate/new breakdown, plus an explicit
@@ -2220,8 +2802,16 @@
       }];
 
       var writeKey = liveSessionKey(hostname);
-      var writeOk = false;
-      try { await liveSessionSet(hostname, session); writeOk = true; } catch (e) { writeOk = false; }
+      console.log('[WS-DIAG] STAGE 12: persisting new session to storage, key=', writeKey);
+      var writeOk = false, writeErrMsg = null;
+      try { await liveSessionSet(hostname, session); writeOk = true; } catch (e) { writeOk = false; writeErrMsg = e && e.message; console.log('[WS-DIAG] STAGE 12: liveSessionSet THREW:', writeErrMsg); }
+      console.log('[WS-DIAG] STAGE 12 done: writeOk=', writeOk);
+      try {
+        if (typeof WSHealthDiag !== 'undefined') {
+          WSHealthDiag.pushEvent('main', 'session-persisted', { writeOk: writeOk });
+          if (!writeOk && writeErrMsg && /quota/i.test(writeErrMsg)) WSHealthDiag.pushEvent('main', 'storage-quota-error', { step: 'session-persist' });
+        }
+      } catch (e) { /* diagnostic-only */ }
       // Explicit write/read-back diagnostic (dev-only): read the SAME key
       // right back from the SAME storage area used to write it, so a
       // silently-blocked/failed write (e.g. a storage access-level
@@ -2253,6 +2843,7 @@
       } catch (e) { /* dev-only logging, never let this block BAŞLA */ }
       activeLiveSession = session;
 
+      console.log('[WS-DIAG] STAGE 13: resetting result UI state, rawRows.length=', rawRows.length);
       invalidateTransformCache();
       activeFilter = null;
       activeDedupe = null;
@@ -2264,12 +2855,16 @@
       if (els.snapshotsPanel) els.snapshotsPanel.hidden = true;
       els.previewSection.hidden = false;
       renderResults();
+      console.log('[WS-DIAG] STAGE 13 done: renderResults() called');
 
       var watchStarted = false;
+      console.log('[WS-DIAG] STAGE 14: sending START_LIVE_WATCH');
       try {
         var watchRes = await sendToContent({ type: 'START_LIVE_WATCH' });
         watchStarted = !!(watchRes && watchRes.ok);
-      } catch (e) { watchStarted = false; }
+        console.log('[WS-DIAG] STAGE 14 done: watchRes=', JSON.stringify(watchRes));
+      } catch (e) { watchStarted = false; console.log('[WS-DIAG] STAGE 14: START_LIVE_WATCH threw:', e && e.message); }
+      try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'start-live-watch-sent', { watchStarted: watchStarted }); } catch (e) { /* diagnostic-only */ }
 
       // AUTOMATIC DATA DISCOVERY ENGINE: always started, unconditionally
       // — see the session-seeding comment above for why no toggle gates
@@ -2280,22 +2875,31 @@
       // discovery.js's own message handler is simply never reached
       // meaningfully — same degrade-safely contract as every other
       // typeof-guarded optional module in this file).
+      console.log('[WS-DIAG] STAGE 15: session.discovery present=', !!session.discovery);
       if (session.discovery) {
-        try { await sendToContent({ type: 'START_DISCOVERY' }); }
-        catch (e) { console.error('[Web Scraper] START_DISCOVERY did not confirm — automatic discovery may not be active for this session.'); }
+        try { await sendToContent({ type: 'START_DISCOVERY' }); console.log('[WS-DIAG] STAGE 15 done: START_DISCOVERY confirmed'); try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'start-discovery-sent', { confirmed: true }); } catch (e1) { /* diagnostic-only */ } }
+        catch (e) {
+          console.error('[Web Scraper] START_DISCOVERY did not confirm — automatic discovery may not be active for this session.');
+          console.log('[WS-DIAG] STAGE 15: START_DISCOVERY threw:', e && e.message);
+          try { if (typeof WSHealthDiag !== 'undefined') WSHealthDiag.pushEvent('main', 'start-discovery-sent', { confirmed: false }); } catch (e2) { /* diagnostic-only */ }
+        }
       }
 
       attachLiveSessionStorageListener();
       switchTab('results');
       setStatus('');
       revealSessionDiagPanelIfDev();
+      revealPaginationDiagPanelIfDev();
+      revealHealthCheckPanelIfDev();
       if (!watchStarted) {
         // Surfaced as a non-blocking warning, not an error — the initial
         // extraction/results/credit above all succeeded regardless; this
         // only means auto-append while browsing may not be active yet.
         console.error('[Web Scraper] START_LIVE_WATCH did not confirm — auto-append may not be active for this session.');
       }
+      console.log('[WS-DIAG] STAGE 16: start function REACHED THE END NORMALLY (before finally)');
     } finally {
+      console.log('[WS-DIAG] STAGE 16: finally block running — runTriggerInFlight reset to false');
       runTriggerInFlight = false;
     }
   }
@@ -2525,6 +3129,17 @@
       }
     }
 
+    // SELF-DIAGNOSTICS / HEALTH CHECK mission — record exactly what was
+    // just rendered, at the exact moment it was rendered. See this
+    // variable's own declaration comment for why.
+    lastRenderedDiscoverySnapshot = {
+      renderedAt: Date.now(),
+      visiblePagesVisited: discovery.pagesVisited || 1,
+      visibleResultCount: discovery.discoveredUnique || 0,
+      isRunningInUI: isDiscovering,
+      isCompletedInUI: isDone
+    };
+
     // Choice panel: only once discovery has actually stopped/completed,
     // and only until a selection has been made.
     var showChoice = isDone && !hasSelection;
@@ -2723,6 +3338,8 @@
       attachLiveSessionStorageListener();
     }
     revealSessionDiagPanelIfDev();
+    revealPaginationDiagPanelIfDev();
+    revealHealthCheckPanelIfDev();
     switchTab('results');
     return true;
   }
@@ -3326,6 +3943,19 @@
       var data = {};
       data[key] = value;
       chrome.storage.session.set(data, resolve);
+    });
+  }
+
+  // DETAIL ENRICHMENT mission: chrome.storage.local mirrors of the above
+  // — needed because background.js's Deep Scrape/Detail Enrichment
+  // run-state key now lives in local storage (durability across a full
+  // browser restart, not just a popup/service-worker restart — see
+  // getDeepScrapeState's own comment). Every other existing session-
+  // storage key in this file (run mode, ZIP run, detail-field-pick
+  // staging, active tab) is untouched and keeps using sessionGet/Set.
+  function localGet(key) {
+    return new Promise(function (resolve) {
+      chrome.storage.local.get([key], function (result) { resolve((result && result[key]) || null); });
     });
   }
 
@@ -5348,7 +5978,14 @@
     // itself is NEVER touched — it stays the pure extraction contract
     // Save Scraper/Preview/Auto Scroll/Multi-page all still rely on
     // (spec #14: "never replace original columns accidentally").
-    var baseColumns = deepScrapeColumns.length ? state.columns.concat(deepScrapeColumns) : state.columns;
+    // DETAIL ENRICHMENT mission: detailColumns (the NEW DETAY tab's own
+    // merged columns) are appended here too, alongside deepScrapeColumns
+    // (the OLD V1.18 panel's) — same single chokepoint, same "state.
+    // columns itself is never touched" guarantee, so every consumer
+    // (Filter/Sort/Dedupe/Preview/Export/download-button-visibility)
+    // sees BOTH sets of merged detail columns identically regardless of
+    // which of the two features (or both) a session actually used.
+    var baseColumns = state.columns.concat(deepScrapeColumns).concat(detailColumns);
     var cleanedRows = applyColumnCleaners(rawRows, baseColumns, { baseUrl: pageUrl });
     // TRAVERSAL/CLEANING mission (section 5/8): always-on data-integrity
     // fixes (Old Price duplicating Current Price, generic ad/marketplace
@@ -5476,6 +6113,7 @@
     updateScrapeWorkflowStatus();
     updateResultsEmptyState();
     updateResearchTabState();
+    updateDetailTabAvailability();
     renderLiveSessionUI();
   }
 
@@ -7214,7 +7852,7 @@
   // it simply falls back to 'scrape' rather than blocking init().
   // =====================================================================
 
-  var TAB_NAMES = ['scrape', 'results', 'monitor', 'research'];
+  var TAB_NAMES = ['scrape', 'results', 'detay', 'monitor', 'research'];
   var ACTIVE_TAB_SESSION_KEY = 'ws_active_tab';
   var activeTab = 'scrape';
 
@@ -7243,6 +7881,8 @@
     updateScrapeWorkflowStatus();
     updateResultsEmptyState();
     updateResearchTabState();
+    updateDetailTabAvailability();
+    if (tab === 'detay') renderDetailSetup();
     if (!opts || opts.persist !== false) {
       try { sessionSet(ACTIVE_TAB_SESSION_KEY, tab); } catch (e) { /* best-effort — remembering the last tab is never allowed to break tab switching itself */ }
     }
@@ -8122,7 +8762,14 @@
    * notes — that keeps every existing Transform/Filter/Sort/CSV/Excel/
    * JSON/Copy code path completely unaware anything changed, since every
    * merged value is still just a plain string like any other column). */
-  function mergeDeepScrapeResults(dsState) {
+  // STORAGE ARCHITECTURE FIX: the actual extracted field VALUES no
+  // longer live inline on dsState.results[url].fields (see background.js's
+  // persistDetailResultFields's own header comment for the full real-
+  // production-report reasoning) — they live in the separate
+  // ws_deepscrape_fields key instead, fetched here once (merge only ever
+  // runs at a terminal state — never a hot path) via the SAME localGet()
+  // helper every other single-key read in this file already uses.
+  async function mergeDeepScrapeResults(dsState) {
     if (!deepScrapeConfig || !deepScrapeConfig.sourceColumnId || !dsState || !dsState.results) return;
     var sourceColId = deepScrapeConfig.sourceColumnId;
     var existingNames = {};
@@ -8140,13 +8787,16 @@
       return { id: 'ds_' + f.id, name: name, sourceFieldId: f.id };
     });
 
+    var fieldsMap = (await localGet('ws_deepscrape_fields')) || {};
+
     rawRows.forEach(function (row) {
       var url = row[sourceColId];
       var record = url ? dsState.results[url] : null;
-      var hasData = record && (record.status === 'completed' || record.status === 'partial') && record.fields;
+      var fields = url ? fieldsMap[url] : null;
+      var hasData = record && (record.status === 'completed' || record.status === 'partial') && fields;
       deepScrapeColumns.forEach(function (dsCol) {
         if (!hasData) { row[dsCol.id] = ''; return; }
-        var raw = record.fields[dsCol.sourceFieldId];
+        var raw = fields[dsCol.sourceFieldId];
         row[dsCol.id] = Array.isArray(raw) ? raw.join('; ') : (raw || '');
       });
     });
@@ -8158,9 +8808,970 @@
   function attachDeepScrapeStorageListener() {
     if (deepScrapeStorageListenerAttached) return;
     deepScrapeStorageListenerAttached = true;
+    // DETAIL ENRICHMENT mission: background.js's getDeepScrapeState/
+    // setDeepScrapeState moved this run-state key from
+    // chrome.storage.session to chrome.storage.local (durability across
+    // a full browser restart, not just a popup close/service-worker
+    // restart — see that change's own comment) — the listener's area
+    // check follows it. Everything else about this function (and the
+    // OLD Advanced "Deep Scraping" panel it drives) is unchanged.
     chrome.storage.onChanged.addListener(function (changes, areaName) {
-      if (areaName !== 'session' || !changes['ws_deepscrape_run']) return;
+      if (areaName !== 'local' || !changes['ws_deepscrape_run']) return;
       renderDeepScrapeProgress(changes['ws_deepscrape_run'].newValue);
+    });
+  }
+
+  // =====================================================================
+  // DETAIL ENRICHMENT (VERİ | SONUÇ | DETAY) — new, separate tab/panel.
+  //
+  // REUSES, UNMODIFIED: the exact same background.js Deep Scrape engine
+  // (START_DEEP_SCRAPE/STOP_DEEP_SCRAPE/TEST_DEEP_SCRAPE_SAMPLE/
+  // RETRY_FAILED_DEEP_SCRAPE_ITEMS/RESUME_DEEP_SCRAPE/
+  // GET_DEEP_SCRAPE_STATE — fetch+tab-lifecycle extraction, concurrency,
+  // retry/backoff, pacing), the exact same content-script picking flow
+  // (content/content.js's element picker, purpose:'live-detail-field' —
+  // its own isolated staging key, see that file's header comment) and
+  // the exact same WSScraper.runDetailExtraction single-page field
+  // extractor the V1.18 "Deep Scraping" panel already uses. This section
+  // is ONLY new config/scope/progress/template UI + the URL<->row merge
+  // for THIS tab's own state — operating on `rawRows`/`state.columns`,
+  // the SAME shared results array/columns both the classic Preview/Run
+  // flow AND the new BAŞLA -> Discovery -> ALL/FIRST-N flow already
+  // populate (see applyProcessingSelection: `rawRows = selectedRows`),
+  // so no new data pipeline is needed — whichever flow produced the
+  // current result set, DETAY works against it identically.
+  //
+  // Deliberately a fully separate set of state/elements from the OLD
+  // V1.18 "Deep Scraping" panel (deepScrapeConfig/deepScrapeColumns/
+  // ds-* ids) — that panel is completely untouched by this addition and
+  // keeps working exactly as before for existing Advanced-mode users.
+  // Both share the ONE background.js run slot (there has only ever been
+  // one — same established convention as the ZIP pipeline), which is
+  // why runId is prefixed distinctly per side ('dse_' here vs 'ds_'
+  // there) — each side's own render function only ever reacts to a
+  // runId it itself started.
+  //
+  // CONCURRENCY: deliberately not exposed as a user control in this new
+  // tab (mission: "Start conservatively... prefer 1 worker initially" —
+  // the OLD panel's own concurrency/delay/retry-limit Advanced controls
+  // remain available for power users who need them). Hardcoded to a
+  // conservative concurrency of 1 — the underlying engine already
+  // proves out higher concurrency safely (see the OLD panel's default of
+  // 4), so this is a deliberate UX choice for the new, simpler flow, not
+  // an architectural ceiling; a future mission can expose it here too.
+  // =====================================================================
+
+  var DETAIL_CONCURRENCY = 1;
+  var DETAIL_DELAY_MODE = 'auto';
+  var DETAIL_RETRY_LIMIT = 3;
+  var DETAIL_SELECT_TABLE_LIMIT = 500; // DOM-size guard for the SELECTED RECORDS checkbox table — FIRST N/FIRST 500 cover larger deliberate subsets
+  var DEEP_SCRAPE_POPUP_POLL_MS = 5000; // STALL-FIX ROUND 3 — see ensureDetailPollTimer's own comment; matches background.js's own documented constant of the same name/value
+
+  var detailConfig = null; // {enabled, sourceColumnId, fields, concurrency, delayMode, customDelayMs, retryLimit} — WSRecipes.emptyDeepScrape() shape, reused for validation/consistency only (enabled/concurrency/delayMode/retryLimit fields are not surfaced in this tab's own UI)
+  var detailColumns = []; // [{id, name, sourceFieldId}] — merged INTO effectiveColumns() via computeTransformedResult(), mirrors deepScrapeColumns exactly
+  var detailEditingFieldId = null;
+  var detailScope = { mode: 'all', n: null };
+  var detailSelectedKeys = Object.create(null); // Set-like: {[stableRowKey]: true}
+  var currentDetailRunId = null;
+  var detailStorageListenerAttached = false;
+  var detailChargedRunIds = Object.create(null); // mirrors deepScrapeChargedRunIds' own belt-and-suspenders idempotency guard
+  var detailTemplatesCache = [];
+
+  // BUG FIX — real production report: "Sıfırla" appeared to delete the
+  // user's configured Detail fields. Root cause: detailConfig (fields/
+  // selectors/extraction modes/source column) previously lived ONLY in
+  // this popup script's own in-memory variable, which is torn down and
+  // rebuilt from scratch every time the popup closes — a completely
+  // ordinary event during a real, long-running Detail Enrichment job.
+  // "Sıfırla"/RESET_DEEP_SCRAPE itself NEVER read or wrote detailConfig
+  // (confirmed by inspection — it only ever touches ws_deepscrape_run/
+  // ws_deepscrape_fields via background.js's resetDeepScrapeState), but
+  // by the time a user reopened the popup and clicked it, the
+  // configuration was already gone from memory, making Sıfırla look like
+  // the culprit. Fix: persist the CONFIGURATION (never the run/progress
+  // state — that stays exclusively in ws_deepscrape_run/ws_deepscrape_
+  // fields, completely untouched by this) under its own small, separate,
+  // per-hostname key — same 'ws_*::<hostname>' convention utils/
+  // detailtemplates.js already established for the DIFFERENT concept of
+  // a named, explicitly-saved template. This key is never read or
+  // written by background.js/resetDeepScrapeState() at all, so it
+  // structurally cannot be affected by a Detail run reset.
+  var DETAIL_ACTIVE_CONFIG_PREFIX = 'ws_detail_active_config::';
+  // Set on the FIRST hydration attempt (success OR failure) and never
+  // reset for the lifetime of this popup instance — guarantees a later,
+  // in-memory edit is never raced/clobbered by a delayed duplicate read.
+  var detailConfigHydrated = false;
+
+  function detailActiveConfigKey(host) { return DETAIL_ACTIVE_CONFIG_PREFIX + WSRunState.normalizeHostname(host); }
+
+  /** Fire-and-forget, best-effort — never blocks the UI, never throws.
+   * Called after every configuration mutation (see
+   * updateDetailWorkloadSummary(), which every add/edit/delete/template-
+   * load/source-column-change site already calls). */
+  function persistActiveDetailConfig() {
+    if (!hostname || !detailConfig) return;
+    try {
+      var data = {};
+      data[detailActiveConfigKey(hostname)] = { sourceColumnId: detailConfig.sourceColumnId || null, fields: detailConfig.fields || [] };
+      chrome.storage.local.set(data);
+    } catch (e) { /* best-effort — never blocks the UI */ }
+  }
+
+  /** Called once (guarded) before the setup screen is first rendered in
+   * this popup instance. Merges any persisted configuration into
+   * detailConfig — a UNION by field id (never a wholesale overwrite), so
+   * this is safe regardless of whether checkForPendingLiveDetailFieldPicks
+   * (the live-picker-return path, also called at init) already populated
+   * some fields in memory before this runs. */
+  async function ensureDetailConfigHydrated() {
+    if (detailConfigHydrated) return;
+    detailConfigHydrated = true;
+    if (!hostname) return;
+    try {
+      var saved = await localGet(detailActiveConfigKey(hostname));
+      if (!saved) return;
+      if (!detailConfig) detailConfig = WSRecipes.emptyDeepScrape();
+      var existingIds = (detailConfig.fields || []).map(function (f) { return f.id; });
+      var savedFields = (saved.fields || []).filter(function (f) { return existingIds.indexOf(f.id) === -1; });
+      detailConfig.fields = (detailConfig.fields || []).concat(savedFields);
+      if (!detailConfig.sourceColumnId) detailConfig.sourceColumnId = saved.sourceColumnId || null;
+    } catch (e) { /* best-effort — a fresh/empty config is a safe fallback */ }
+  }
+
+  /** The one stable, non-positional row identity DETAY uses for
+   * SELECTED RECORDS and (indirectly, via the source column itself) for
+   * the merge-back step — mission: "must use stable record identity,
+   * preferably canonical URL... Do NOT merge by array position." Prefers
+   * the first Link-like column's own value (present on virtually every
+   * real dataset this extension produces); falls back to a full-row
+   * value fingerprint only when no link column exists at all, which
+   * still never depends on array position. Computed ONCE per render
+   * (the returned closure), not per-row, since finding the link column
+   * is a small but non-trivial scan of effectiveColumns(). */
+  function makeDetailRowKeyFn() {
+    var linkCol = effectiveColumns().filter(isLinkLikeColumn)[0];
+    return function (row) {
+      if (linkCol && row[linkCol.id]) return String(row[linkCol.id]);
+      return JSON.stringify(row);
+    };
+  }
+
+  function dtSourceColumnCandidates() {
+    return effectiveColumns().filter(isLinkLikeColumn);
+  }
+
+  /** Shown/enabled only once a real result dataset exists — mission:
+   * "DETAY becomes available only after a valid result dataset exists."
+   * Reversible: if rawRows is ever cleared (a fresh scrape), the tab
+   * goes back to disabled and — if it happened to be the active tab —
+   * this function does NOT itself force-navigate away (switchTab's own
+   * normal flow, e.g. clearResults() not touching activeTab directly,
+   * already avoids landing on a disabled tab in practice since a fresh
+   * scrape always routes through 'scrape'/'results'). */
+  function updateDetailTabAvailability() {
+    var hasRows = rawRows.length > 0;
+    if (els.detayTabBtn) els.detayTabBtn.disabled = !hasRows;
+    if (els.detayEmpty) els.detayEmpty.hidden = hasRows;
+    if (els.detayBody) els.detayBody.hidden = !hasRows;
+  }
+
+  async function renderDetailSetup() {
+    await ensureDetailConfigHydrated();
+    if (!detailConfig) detailConfig = WSRecipes.emptyDeepScrape();
+    if (!els.dtSourceColumn) return;
+
+    var candidates = dtSourceColumnCandidates();
+    els.dtSourceColumn.innerHTML = '';
+    if (!candidates.length) {
+      var opt0 = document.createElement('option');
+      opt0.value = '';
+      opt0.textContent = '—';
+      els.dtSourceColumn.appendChild(opt0);
+    } else {
+      candidates.forEach(function (c) {
+        var opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        if (c.id === detailConfig.sourceColumnId) opt.selected = true;
+        els.dtSourceColumn.appendChild(opt);
+      });
+      if (!candidates.some(function (c) { return c.id === detailConfig.sourceColumnId; })) {
+        detailConfig.sourceColumnId = candidates[0].id;
+      }
+    }
+    if (els.dtNoLinkColumn) els.dtNoLinkColumn.hidden = candidates.length > 0;
+    els.dtSourceColumn.disabled = !candidates.length;
+
+    renderDetailFieldsList();
+    renderDetailTemplatesSelect();
+    updateDetailWorkloadSummary();
+    revealDetailPickDiagPanelIfDev();
+  }
+
+  function renderDetailFieldsList() {
+    if (!els.dtFieldsList) return;
+    els.dtFieldsList.innerHTML = '';
+    var fields = (detailConfig && detailConfig.fields) || [];
+    els.dtFieldsEmpty.hidden = fields.length > 0;
+    fields.forEach(function (f) {
+      var li = document.createElement('li');
+      li.className = 'ws-column-row';
+      var nameEl = document.createElement('span');
+      nameEl.className = 'ws-column-name';
+      nameEl.style.cssText = 'flex:1;padding:4px 0;';
+      nameEl.textContent = f.name;
+      var tag = document.createElement('span');
+      tag.className = 'ws-column-tag';
+      tag.textContent = attrLabel(f.attribute) + (f.multiple === 'all' ? ' (all)' : '');
+      var delBtn = document.createElement('button');
+      delBtn.className = 'ws-column-delete';
+      delBtn.textContent = '×';
+      delBtn.title = 'Delete field'; delBtn.setAttribute('aria-label', 'Delete field');
+      delBtn.addEventListener('click', function () {
+        detailConfig.fields = detailConfig.fields.filter(function (x) { return x.id !== f.id; });
+        renderDetailFieldsList();
+        updateDetailWorkloadSummary();
+      });
+      li.appendChild(nameEl);
+      li.appendChild(tag);
+      li.appendChild(delBtn);
+      els.dtFieldsList.appendChild(li);
+    });
+  }
+
+  function computeDetailUrlInfo() {
+    if (!detailConfig || !detailConfig.sourceColumnId) return { urls: [], totalRows: 0, missingUrl: 0, invalidUrl: 0 };
+    return WSDetailScope.buildDetailUrlList(rawRows, detailConfig.sourceColumnId, WSDownloads.validateDownloadUrl);
+  }
+
+  function updateDetailWorkloadSummary() {
+    // BUG FIX — persists the CONFIGURATION (fields/selectors/extraction
+    // modes/source column) after every mutation. Every add/edit/delete/
+    // template-load/source-column-change call site already calls this
+    // function, making it the one common point that reaches every
+    // mutation without needing a separate persist call at each site.
+    persistActiveDetailConfig();
+    if (!els.dtWorkloadSummary) return;
+    var info = computeDetailUrlInfo();
+    var fieldCount = ((detailConfig && detailConfig.fields) || []).length;
+    els.dtWorkloadSummary.textContent = WSI18n.t('detail.workloadSummary', {
+      rows: rawRows.length, urls: info.urls.length, fields: fieldCount
+    });
+  }
+
+  function handleDtFieldAttributeChange() {
+    els.dtFieldAttrNameRow.hidden = els.dtFieldAttribute.value !== 'attr';
+  }
+
+  function handleDtAddFieldClick() {
+    detailEditingFieldId = null;
+    els.dtFieldName.value = '';
+    els.dtFieldSelector.value = '';
+    els.dtFieldAttribute.value = 'text';
+    els.dtFieldAttrName.value = '';
+    els.dtFieldMultiple.checked = false;
+    els.dtFieldAttrNameRow.hidden = true;
+    els.dtAddFieldForm.hidden = false;
+    els.dtFieldName.focus();
+  }
+
+  function handleDtFieldCancelClick() {
+    els.dtAddFieldForm.hidden = true;
+    detailEditingFieldId = null;
+  }
+
+  function handleDtFieldSaveClick() {
+    var name = els.dtFieldName.value.trim();
+    var selector = els.dtFieldSelector.value.trim();
+    if (!name || !selector) { setStatus(WSI18n.t('detail.fieldNameSelectorRequired'), true); return; }
+    var field = {
+      id: detailEditingFieldId || WSStorage.makeColumnId(),
+      name: name,
+      relativeSelector: selector,
+      attribute: els.dtFieldAttribute.value,
+      multiple: els.dtFieldMultiple.checked ? 'all' : 'first'
+    };
+    if (field.attribute === 'attr') field.attributeName = els.dtFieldAttrName.value.trim();
+    if (!detailConfig) detailConfig = WSRecipes.emptyDeepScrape();
+    if (detailEditingFieldId) {
+      detailConfig.fields = detailConfig.fields.map(function (f) { return f.id === detailEditingFieldId ? field : f; });
+    } else {
+      detailConfig.fields = (detailConfig.fields || []).concat([field]);
+    }
+    els.dtAddFieldForm.hidden = true;
+    detailEditingFieldId = null;
+    renderDetailFieldsList();
+    updateDetailWorkloadSummary();
+  }
+
+  /** Reuses the real element picker (content/content.js), pointed at a
+   * SAMPLE record's own detail page opened in its own real, active tab —
+   * mission steps 4-11 verbatim: pick a field, name it, see the example
+   * value immediately (the picker's own in-page panel already does
+   * this), stay in pick mode for additional fields, Done/Esc to finish.
+   * purpose:'live-detail-field' keeps this fully isolated from the OLD
+   * Deep Scraping panel's own identical-looking picks (see content.js's
+   * header comment on detailStagingKeyPrefix). */
+  /** BUG REOPEN — REAL PRODUCTION FLOW FIX (root cause confirmed): the
+   * previous implementation ran chrome.tabs.create() -> wait for the tab
+   * to load -> inject the content script -> send START_PICK, ALL as a
+   * single chain of awaits inside THIS popup script. In the REAL Chrome
+   * toolbar popup (a surface this project's own Playwright test harness
+   * cannot drive at all — see e2e/run.js's own documented limitation,
+   * exactly how this got missed by the previous fix's own real-browser
+   * testing, which only ever opens popup.html as an ordinary TAB, a
+   * surface with none of this behavior), opening a new ACTIVE tab via
+   * chrome.tabs.create() steals window focus away from the popup — and
+   * losing focus is one of the standard, well-known ways a real
+   * browser-action popup gets destroyed: its ENTIRE JS execution context
+   * is torn down immediately, mid-await, before any later step (waiting
+   * for the tab to load, injecting the content script, actually sending
+   * START_PICK) ever runs. This is an exact match for the real, reported
+   * symptom: no highlight, nothing captured, nothing returned — the
+   * picker was never even being TOLD to start, because the code that
+   * would have told it never got to execute.
+   *
+   * THE FIX: the popup's only remaining job is a single, fire-and-forget
+   * message to the BACKGROUND SERVICE WORKER (START_DETAIL_FIELD_PICK,
+   * same "ack immediately, keep working after the response" contract
+   * this file's own START_DEEP_SCRAPE call already uses) — the service
+   * worker is never tied to the popup's lifetime, so the entire
+   * open-tab -> wait-for-load -> inject -> START_PICK sequence
+   * (background.js#startDetailFieldPick) now reliably completes whether
+   * or not the popup is still open a millisecond later. Every step is
+   * persisted to chrome.storage.local (ws_detail_pick_session),
+   * independent of popup lifetime — see that function's own comments for
+   * the full diagnostic trail this produces (mission Phase 1/2's own
+   * explicit ask: tab id, URL, message sent/received, picker active
+   * true/false, all inspectable regardless of whether the popup that
+   * triggered it still exists). */
+  async function handleDtPickFieldsClick() {
+    if (!detailConfig) detailConfig = WSRecipes.emptyDeepScrape();
+    var info = computeDetailUrlInfo();
+    if (!info.urls.length) { setStatus(WSI18n.t('detail.noUrlsYet'), true); return; }
+    var sampleUrl = info.urls[0];
+    try {
+      var res = await sendToBackground({ type: 'START_DETAIL_FIELD_PICK', sampleUrl: sampleUrl, hostname: hostname });
+      if (!res || !res.ok) { setStatus(WSI18n.t('detail.pickFailed'), true); return; }
+      setStatus(WSI18n.t('detail.pickHint'), false);
+    } catch (e) {
+      setStatus(WSI18n.t('detail.pickFailed'), true);
+    }
+  }
+
+  /** DEV ONLY — same reachability contract as revealSessionDiagPanelIfDev()
+   * elsewhere in this file. Reveals the picker-activation diagnostic
+   * panel (mission Phase 1/2's own explicit ask). */
+  async function revealDetailPickDiagPanelIfDev() {
+    if (!els.detailPickDiagPanel) return;
+    var isDev = false;
+    try { isDev = await WSLicense.isDevelopmentInstall(); } catch (e) { isDev = false; }
+    els.detailPickDiagPanel.hidden = !isDev;
+  }
+
+  /** Formats background.js's ws_detail_pick_session state — every step
+   * of the real activation sequence, in order, so "did the picker
+   * actually activate, and if not, exactly where did it stop" is
+   * answerable from one paste, independent of whether the popup that
+   * triggered the sequence is still open (that's the whole point — see
+   * background.js#startDetailFieldPick's own header comment). */
+  function formatDetailPickDiagnosticReport(session) {
+    var lines = [];
+    lines.push('=== Detail Field Picker Activation Diagnostic ===');
+    lines.push('Generated: ' + new Date().toISOString());
+    lines.push('Extension version: ' + (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '?'));
+    lines.push('');
+    if (!session) {
+      lines.push('No picker session recorded yet — click "Pick a Field on an Example Page" first.');
+      return lines.join('\n');
+    }
+    lines.push('step (last reached): ' + session.step);
+    lines.push('hostname: ' + session.hostname);
+    lines.push('sampleUrl (requested): ' + session.sampleUrl);
+    lines.push('');
+    lines.push('1. message received by background: true (a session was recorded at all)');
+    lines.push('2. real tab created: ' + (session.tabId != null) + (session.tabId != null ? ' (tabId=' + session.tabId + ')' : ''));
+    lines.push('3. tab URL: ' + (session.tabUrl || '(none)'));
+    lines.push('4. tab finished loading: ' + !!session.tabLoaded);
+    lines.push('5. fresh content-script injection was needed: ' + !!session.injected + ' (false is expected/healthy — means the persistent registration already had it)');
+    lines.push('6. START_PICK message sent to that tab: ' + !!session.messageSent);
+    lines.push('7. content script ACKed (picker genuinely active on its side): ' + !!session.messageAcked);
+    lines.push('');
+    lines.push('pickerActive: ' + session.pickerActive);
+    if (session.error) lines.push('error: ' + session.error);
+    lines.push('startedAt: ' + new Date(session.startedAt).toISOString());
+    lines.push('updatedAt: ' + new Date(session.updatedAt).toISOString());
+    return lines.join('\n');
+  }
+
+  async function handleCopyDetailPickDiagnostic() {
+    if (els.detailPickDiagStatus) els.detailPickDiagStatus.textContent = 'Reading picker session…';
+    if (els.detailPickDiagTextarea) els.detailPickDiagTextarea.hidden = true;
+    var res;
+    try {
+      res = await sendToBackground({ type: 'GET_DETAIL_PICK_SESSION' });
+    } catch (e) {
+      if (els.detailPickDiagStatus) els.detailPickDiagStatus.textContent = 'Diagnostic failed: ' + (e && e.message || e);
+      return;
+    }
+    var text = formatDetailPickDiagnosticReport(res && res.session);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (els.detailPickDiagStatus) els.detailPickDiagStatus.textContent = 'Copied to clipboard (' + text.length + ' characters). Paste it back.';
+    } catch (e) {
+      if (els.detailPickDiagStatus) els.detailPickDiagStatus.textContent = 'Clipboard unavailable — select all the text below and copy it manually.';
+      if (els.detailPickDiagTextarea) {
+        els.detailPickDiagTextarea.hidden = false;
+        els.detailPickDiagTextarea.value = text;
+        els.detailPickDiagTextarea.focus();
+        els.detailPickDiagTextarea.select();
+      }
+    }
+  }
+
+  /** Mirrors checkForPendingDetailFieldPicks()'s exact recovery pattern,
+   * for this tab's own isolated staging key. Called once at init(). */
+  async function checkForPendingLiveDetailFieldPicks() {
+    var key = 'ws_live_detail_field_picks::' + hostname;
+    var staged = await sessionGet(key);
+    if (!staged || !staged.length) return;
+    if (!detailConfig) detailConfig = WSRecipes.emptyDeepScrape();
+    var existingIds = (detailConfig.fields || []).map(function (f) { return f.id; });
+    var newOnes = staged.filter(function (f) { return existingIds.indexOf(f.id) === -1; });
+    detailConfig.fields = (detailConfig.fields || []).concat(newOnes);
+    await sessionSet(key, null);
+    if (newOnes.length) {
+      // BUG FIX — persist immediately, regardless of whether the Detay
+      // tab happens to be visible right now: without this, fields picked
+      // via the live picker flow while viewing a DIFFERENT tab were never
+      // written to ws_detail_active_config::<hostname> at all, and would
+      // be lost the next time the popup closed.
+      persistActiveDetailConfig();
+      if (els.detayBody && !els.detayBody.hidden) renderDetailSetup();
+      setStatus(WSI18n.t('detail.fieldsAddedFromSample', { count: newOnes.length }), false, 'success');
+    }
+  }
+
+  /** Mission's own explicit PREVIEW/VALIDATION requirement: "Never start
+   * hundreds of detail-page visits without validating the template
+   * first... If a selector produces no value on the example page,
+   * clearly indicate that before bulk processing." Reuses the exact
+   * same TEST_DEEP_SCRAPE_SAMPLE pipeline the OLD panel's own "Test"
+   * button uses, formatted as the mission's own example layout
+   * ("Seller -> MaisonEsmee"). */
+  async function handleDtTestClick() {
+    if (!detailConfig || !detailConfig.fields || !detailConfig.fields.length) { setStatus(WSI18n.t('detail.addFieldFirst'), true); return; }
+    var info = computeDetailUrlInfo();
+    if (!info.urls.length) { setStatus(WSI18n.t('detail.noUrlsYet'), true); return; }
+    var sampleUrls = info.urls.slice(0, 3);
+
+    var originPatterns = WSDownloads.uniqueOriginPatterns(sampleUrls);
+    if (originPatterns.length) {
+      var granted = false;
+      try { granted = await chrome.permissions.request({ origins: originPatterns }); } catch (e) { granted = false; }
+      if (!granted) { setStatus(WSI18n.t('detail.permissionDeclined'), true); return; }
+    }
+
+    els.dtTestResults.hidden = false;
+    els.dtTestResults.textContent = WSI18n.t('detail.testing', { count: sampleUrls.length });
+    var res;
+    try {
+      res = await sendToBackground({ type: 'TEST_DEEP_SCRAPE_SAMPLE', urls: sampleUrls, fields: detailConfig.fields });
+    } catch (e) {
+      els.dtTestResults.textContent = WSI18n.t('detail.testUnreachable');
+      return;
+    }
+    if (!res || !res.ok) { els.dtTestResults.textContent = WSI18n.t('detail.testFailed'); return; }
+
+    var lines = [];
+    sampleUrls.forEach(function (url, i) {
+      var r = res.results[url];
+      lines.push(WSI18n.t('detail.testPageLabel', { n: i + 1 }));
+      if (!r || r.status === 'failed') {
+        lines.push('  ' + WSI18n.t('detail.testPageFailed') + (r && r.error ? ' — ' + r.error : ''));
+        return;
+      }
+      detailConfig.fields.forEach(function (f) {
+        var val = r.fields ? r.fields[f.id] : undefined;
+        var display = Array.isArray(val) ? (val.length ? val.join('; ') : null) : (val || null);
+        lines.push('  ' + f.name + ' -> ' + (display ? String(display).slice(0, 80) : WSI18n.t('detail.testMissing')));
+      });
+    });
+    els.dtTestResults.textContent = lines.join('\n');
+  }
+
+  // ---- Templates (save/load/delete — never applied automatically) ----
+
+  async function renderDetailTemplatesSelect() {
+    if (!els.dtTemplateSelect) return;
+    detailTemplatesCache = await WSDetailTemplates.list(hostname);
+    els.dtTemplateSelect.innerHTML = '';
+    if (!detailTemplatesCache.length) {
+      var opt0 = document.createElement('option');
+      opt0.value = '';
+      opt0.textContent = '—';
+      els.dtTemplateSelect.appendChild(opt0);
+    } else {
+      detailTemplatesCache.forEach(function (t) {
+        var opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.name + ' (' + t.fields.length + ')';
+        els.dtTemplateSelect.appendChild(opt);
+      });
+    }
+    if (els.dtTemplatesEmpty) els.dtTemplatesEmpty.hidden = detailTemplatesCache.length > 0;
+    els.dtTemplateSelect.disabled = !detailTemplatesCache.length;
+    if (els.dtLoadTemplateBtn) els.dtLoadTemplateBtn.disabled = !detailTemplatesCache.length;
+    if (els.dtDeleteTemplateBtn) els.dtDeleteTemplateBtn.disabled = !detailTemplatesCache.length;
+  }
+
+  async function handleDtSaveTemplateClick() {
+    if (!detailConfig || !detailConfig.fields || !detailConfig.fields.length) { setStatus(WSI18n.t('detail.addFieldFirst'), true); return; }
+    var name = prompt(WSI18n.t('detail.templateNamePrompt'), hostname);
+    if (!name) return;
+    var sourceCol = dtSourceColumnCandidates().filter(function (c) { return c.id === detailConfig.sourceColumnId; })[0];
+    var res = await WSDetailTemplates.save(hostname, name, detailConfig.fields, sourceCol ? sourceCol.name : null);
+    // WSDetailTemplates.save()'s own {ok:false, error} codes ('name-taken'/
+    // 'name-required'/'no-fields') are all narrow, already-prevented-by-
+    // the-UI edge cases (the name-required check above already guards
+    // empty names; 'no-fields' can't happen since the Save Template
+    // button is only ever reachable with fields already present) except
+    // 'name-taken', which is the one a user can genuinely hit — a single
+    // generic message covers all three honestly without needing a
+    // separate i18n key per internal error code.
+    if (!res.ok) { setStatus(WSI18n.t('detail.templateSaveFailed'), true); return; }
+    setStatus(WSI18n.t('detail.templateSaved'), false, 'success');
+    renderDetailTemplatesSelect();
+  }
+
+  /** Mission: "Do NOT silently apply saved templates. The user chooses
+   * to load one." — only ever reachable via this explicit button click.
+   * Replaces (not appends to) the current field list, matching "load a
+   * template" as adopting that configuration wholesale — a user who
+   * wants both keeps the old fields by not loading over them, or
+   * re-adds specific ones after. */
+  async function handleDtLoadTemplateClick() {
+    var id = els.dtTemplateSelect.value;
+    var template = detailTemplatesCache.filter(function (t) { return t.id === id; })[0];
+    if (!template) return;
+    if (!detailConfig) detailConfig = WSRecipes.emptyDeepScrape();
+    detailConfig.fields = WSDetailTemplates.instantiateFields(template, WSStorage.makeColumnId);
+    renderDetailFieldsList();
+    updateDetailWorkloadSummary();
+    setStatus(WSI18n.t('detail.templateLoaded', { name: template.name }), false, 'success');
+  }
+
+  async function handleDtDeleteTemplateClick() {
+    var id = els.dtTemplateSelect.value;
+    if (!id) return;
+    await WSDetailTemplates.remove(hostname, id);
+    renderDetailTemplatesSelect();
+  }
+
+  // ---- Scope (ALL / FIRST 100 / FIRST 500 / FIRST N / SELECTED RECORDS) ----
+
+  function setDetailScopeMode(mode) {
+    detailScope.mode = mode === 'first100' || mode === 'first500' || mode === 'firstn' ? 'first' : mode;
+    if (mode === 'first100') detailScope.n = 100;
+    else if (mode === 'first500') detailScope.n = 500;
+    else if (mode === 'firstn') detailScope.n = parseInt(els.dtScopeFirstNInput.value, 10) || null;
+
+    [els.dtScopeAllBtn, els.dtScopeFirst100Btn, els.dtScopeFirst500Btn, els.dtScopeFirstNBtn, els.dtScopeSelectedBtn].forEach(function (btn) {
+      if (btn) btn.classList.remove('ws-chip-active');
+    });
+    var activeBtnMap = { all: els.dtScopeAllBtn, first100: els.dtScopeFirst100Btn, first500: els.dtScopeFirst500Btn, firstn: els.dtScopeFirstNBtn, selected: els.dtScopeSelectedBtn };
+    if (activeBtnMap[mode]) activeBtnMap[mode].classList.add('ws-chip-active');
+
+    if (els.dtScopeFirstNRow) els.dtScopeFirstNRow.hidden = mode !== 'firstn';
+    if (els.dtScopeSelectedRow) {
+      els.dtScopeSelectedRow.hidden = mode !== 'selected';
+      if (mode === 'selected') renderDetailRecordsTable();
+    }
+    if (els.dtScopeError) els.dtScopeError.hidden = true;
+  }
+
+  function handleDtScopeFirstNInput() {
+    if (detailScope.mode === 'first') detailScope.n = parseInt(els.dtScopeFirstNInput.value, 10) || null;
+  }
+
+  /** Compact checkbox table for SELECTED RECORDS — a NEW, self-contained
+   * render, deliberately not reusing renderResults()'s own (larger,
+   * transform-aware) table-building code, to keep this addition fully
+   * isolated from that proven, heavily-relied-on function. Shows up to
+   * DETAIL_SELECT_TABLE_LIMIT rows — large datasets are expected to use
+   * FIRST N/FIRST 500 instead, exactly as the mission's own examples
+   * imply (a manual per-row pick over 1,283 rows is not a realistic
+   * SELECTED RECORDS use case). */
+  function renderDetailRecordsTable() {
+    if (!els.dtRecordsTable) return;
+    var keyFn = makeDetailRowKeyFn();
+    var labelCol = effectiveColumns().filter(function (c) { return !isImageLikeColumn(c) && !isLinkLikeColumn(c); })[0] || effectiveColumns()[0];
+    var tbody = els.dtRecordsTable.querySelector('tbody') || els.dtRecordsTable;
+    tbody.innerHTML = '';
+    var shown = rawRows.slice(0, DETAIL_SELECT_TABLE_LIMIT);
+    shown.forEach(function (row) {
+      var key = keyFn(row);
+      var tr = document.createElement('tr');
+      var tdCb = document.createElement('td');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!detailSelectedKeys[key];
+      cb.addEventListener('change', function () {
+        if (cb.checked) detailSelectedKeys[key] = true; else delete detailSelectedKeys[key];
+        updateDetailSelectionCount();
+      });
+      tdCb.appendChild(cb);
+      var tdLabel = document.createElement('td');
+      tdLabel.textContent = labelCol ? String(row[labelCol.id] || '') : key;
+      tdLabel.style.cssText = 'max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      tr.appendChild(tdCb);
+      tr.appendChild(tdLabel);
+      tbody.appendChild(tr);
+    });
+    updateDetailSelectionCount();
+  }
+
+  function updateDetailSelectionCount() {
+    if (!els.dtSelectionCount) return;
+    var count = Object.keys(detailSelectedKeys).length;
+    els.dtSelectionCount.textContent = WSI18n.t('detail.selectedCount', { count: count });
+  }
+
+  function handleDtSelectAll() {
+    var keyFn = makeDetailRowKeyFn();
+    rawRows.slice(0, DETAIL_SELECT_TABLE_LIMIT).forEach(function (row) { detailSelectedKeys[keyFn(row)] = true; });
+    renderDetailRecordsTable();
+  }
+
+  function handleDtClearSelection() {
+    detailSelectedKeys = Object.create(null);
+    renderDetailRecordsTable();
+  }
+
+  function makeDetailRunId() {
+    return 'dse_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  /** Mission section "SCOPE SELECTION": "Do not assume that a
+   * 1,283-record dataset should automatically cause 1,283 detail-page
+   * visits. The user decides." — this is the ONE place that decision is
+   * actually made: validates the chosen scope, slices `rawRows`
+   * accordingly (never merges/skips by array position — selectScopedRows
+   * uses the same stable keyFn used for SELECTED RECORDS), THEN builds
+   * the deduped/validated URL list from exactly that subset. */
+  async function handleDetailStartClick() {
+    if (!detailConfig || !detailConfig.fields || !detailConfig.fields.length) { setStatus(WSI18n.t('detail.addFieldFirst'), true); return; }
+    if (!detailConfig.sourceColumnId) { setStatus(WSI18n.t('detail.chooseLinkColumn'), true); return; }
+    if (!(await trialAllowsNewRun())) { showTrialCompleteModal(); return; }
+
+    var keyFn = makeDetailRowKeyFn();
+    var scope = { mode: detailScope.mode, n: detailScope.n, selectedKeys: Object.keys(detailSelectedKeys) };
+    var validation = WSDetailScope.validateScope(scope, rawRows.length);
+    if (!validation.ok) {
+      // WSDetailScope.validateScope()'s own {ok:false, error} codes are
+      // all narrow states the UI already steers around (a disabled FIRST
+      // N input below 1, an empty SELECTED RECORDS set) — one generic,
+      // honest message covers every case without a per-code i18n key.
+      if (els.dtScopeError) { els.dtScopeError.hidden = false; els.dtScopeError.textContent = WSI18n.t('detail.scopeErrorGeneric'); }
+      return;
+    }
+    if (els.dtScopeError) els.dtScopeError.hidden = true;
+
+    var scopedRows = WSDetailScope.selectScopedRows(rawRows, scope, keyFn);
+    var info = WSDetailScope.buildDetailUrlList(scopedRows, detailConfig.sourceColumnId, WSDownloads.validateDownloadUrl);
+    if (!info.urls.length) { setStatus(WSI18n.t('detail.noUrlsInScope'), true); return; }
+
+    var originPatterns = WSDownloads.uniqueOriginPatterns(info.urls);
+    if (originPatterns.length) {
+      var granted = false;
+      try { granted = await chrome.permissions.request({ origins: originPatterns }); } catch (e) { granted = false; }
+      if (!granted) { setStatus(WSI18n.t('detail.permissionDeclined'), true); return; }
+    }
+
+    currentDetailRunId = makeDetailRunId();
+    attachDetailStorageListener();
+    els.dtProgressSection.hidden = false;
+    els.dtSummaryText.hidden = true;
+    els.dtSetupSection.hidden = true;
+
+    await sendToBackground({
+      type: 'START_DEEP_SCRAPE', runId: currentDetailRunId, urls: info.urls, fields: detailConfig.fields,
+      concurrency: DETAIL_CONCURRENCY, delayMode: DETAIL_DELAY_MODE, customDelayMs: null,
+      originPatterns: originPatterns, retryLimit: DETAIL_RETRY_LIMIT
+    });
+  }
+
+  /** STALL-FIX ROUND 3 — the real popup Durdur button's own production
+   * path, made genuinely OUT-OF-BAND (mission's own explicit requirement:
+   * "STOP must not depend on the currently hung promise resolving").
+   * Writes stopRequested/status:'stopping' DIRECTLY to chrome.storage.
+   * local from the POPUP's own context — this succeeds independent of
+   * whether the background service worker is currently alive, slow, or
+   * unresponsive at all (a real, confirmed real-world condition this
+   * project's own environment has shown, up to a genuine 7-minute stall
+   * on a single chrome.permissions.request() call — see MISSION.md).
+   * chrome.storage.onChanged fires for this write in THIS SAME popup
+   * too, so the UI shows "Stopping safely…" instantly, without waiting
+   * on any message round-trip at all. background.js's own
+   * reconcileDeepScrapeJob (triggered by the message below when it DOES
+   * get through, by the next stall-watchdog alarm, or by this popup's
+   * own active polling — see pollDetailJobWhileActive) is what actually
+   * finalizes the real terminal STOPPED state and closes the owned
+   * worker tab; this function's job is only to make the REQUEST itself
+   * unconditionally durable. */
+  async function directlyPersistDetailStopRequested(runId) {
+    var current = await localGet('ws_deepscrape_run');
+    if (!current || current.runId !== runId) return;
+    current.stopRequested = true;
+    if (current.status === 'running') current.status = 'stopping';
+    current.updatedAt = Date.now();
+    await new Promise(function (resolve) {
+      var data = {}; data['ws_deepscrape_run'] = current;
+      chrome.storage.local.set(data, resolve);
+    });
+  }
+
+  async function handleDetailStopClick() {
+    if (!currentDetailRunId) return;
+    await directlyPersistDetailStopRequested(currentDetailRunId);
+    // Fast path for when the background IS responsive — best-effort,
+    // never awaited/blocking, since the out-of-band write above is what
+    // actually guarantees Stop takes effect either way.
+    sendToBackground({ type: 'STOP_DEEP_SCRAPE', runId: currentDetailRunId }).catch(function () {});
+  }
+
+  /** STALL-FIX ROUND 3 — while a Detail Enrichment job is running or
+   * stopping, periodically pokes the background with an ordinary,
+   * already-existing message (GET_DEEP_SCRAPE_STATE). This message
+   * ALSO reaches background.js's own dedicated reconciliation listener
+   * (see that file's own comment — every registered onMessage listener
+   * fires for every message), so simply having this popup open gives
+   * fast, real recovery of a stalled job without waiting on the once-a-
+   * minute stall-watchdog alarm. Started/stopped automatically by
+   * renderDetailProgress below; never runs while the popup is closed
+   * (a normal setInterval, not subject to service-worker suspension —
+   * it only needs to survive as long as this popup page itself is open,
+   * and the alarm remains the guaranteed fallback for when it's not). */
+  var detailPollTimer = null;
+  function ensureDetailPollTimer(shouldRun) {
+    if (shouldRun && !detailPollTimer) {
+      detailPollTimer = setInterval(function () {
+        sendToBackground({ type: 'GET_DEEP_SCRAPE_STATE' }).catch(function () {});
+      }, DEEP_SCRAPE_POPUP_POLL_MS);
+    } else if (!shouldRun && detailPollTimer) {
+      clearInterval(detailPollTimer);
+      detailPollTimer = null;
+    }
+  }
+
+  async function handleDetailRetryFailedClick() {
+    if (!currentDetailRunId) return;
+    els.dtSummaryText.hidden = true;
+    await sendToBackground({ type: 'RETRY_FAILED_DEEP_SCRAPE_ITEMS', runId: currentDetailRunId });
+  }
+
+  /** Mission's own explicit CHECKPOINT/RESUME requirement — see
+   * background.js's resumeInterruptedDeepScrapeItems for exactly which
+   * URLs get re-queued (pending/fetching/failed, a superset of Retry
+   * Failed's failed-only scope) and why this is the fix for "the
+   * process stops at record 700, the first 699 must not be lost". */
+  async function handleDetailResumeClick() {
+    if (!currentDetailRunId) return;
+    els.dtSummaryText.hidden = true;
+    await sendToBackground({ type: 'RESUME_DEEP_SCRAPE', runId: currentDetailRunId });
+  }
+
+  function handleDetailNewRunClick() {
+    ensureDetailPollTimer(false); // STALL-FIX ROUND 3 — leaving this run behind, nothing left to poll for
+    currentDetailRunId = null;
+    els.dtProgressSection.hidden = true;
+    els.dtSetupSection.hidden = false;
+    renderDetailSetup();
+  }
+
+  /** DETAIL ENRICHMENT RESET (real production request) — a real, explicit
+   * "Sıfırla" button. Confirms first (the exact real-production-requested
+   * wording, via WSI18n so every locale gets its own correct translation
+   * — see utils/i18n-data.js's own 'detail.resetConfirm'); a cancelled
+   * confirm changes absolutely nothing (window.confirm's own real, native
+   * behavior — returns false, this function returns immediately after).
+   * Delegates the actual "stop any live worker safely, then clear ONLY
+   * ws_deepscrape_run/ws_deepscrape_fields" work entirely to background.js's
+   * resetDeepScrapeState() (RESET_DEEP_SCRAPE message) — background.js is
+   * the one authoritative owner of those two keys (same principle every
+   * other Deep Scrape write already follows), so the popup never touches
+   * chrome.storage.local for them directly. Main scrape results
+   * (ws_live_session::*), license/settings/templates/snapshots, and every
+   * other site's own state are structurally untouched — this message
+   * type's own handler never reads or writes anything else. */
+  async function handleDetailResetClick() {
+    if (!confirm(WSI18n.t('detail.resetConfirm'))) return;
+    ensureDetailPollTimer(false);
+    var res = await sendToBackground({ type: 'RESET_DEEP_SCRAPE' }).catch(function (e) { return { ok: false, error: String(e && e.message || e) }; });
+    if (!res || !res.ok) {
+      console.error('[Web Scraper] Detail Enrichment reset did not confirm:', res && res.error);
+    }
+    currentDetailRunId = null;
+    els.dtSummaryText.hidden = true;
+    els.dtProgressSection.hidden = true;
+    els.dtSetupSection.hidden = false;
+    renderDetailSetup();
+  }
+
+  function renderDetailProgress(dsState) {
+    if (!dsState || dsState.runId !== currentDetailRunId) return;
+    els.dtProgressSection.hidden = false;
+    // DETAIL ENRICHMENT RESET — always available whenever a real run
+    // (terminal or still active) is being shown, not gated behind
+    // isTerminal like Resume/Retry/NewRun below: resetDeepScrapeState()
+    // (background.js) itself safely stops a genuinely live worker first,
+    // so the button never needs to wait for a terminal state to be safe.
+    if (els.dtResetBtn) els.dtResetBtn.hidden = false;
+    var isTerminal = ['completed', 'stopped', 'error'].indexOf(dsState.status) !== -1;
+    // STALL-FIX ROUND 3 — 'stopping' is a real, honest, visible interim
+    // state (mission's own explicit UI requirement: "While STOPPING show
+    // 'Stopping safely...' Then: STOPPED. Do not leave RUNNING after
+    // STOP was requested.") — set the instant the popup's own out-of-
+    // band write (or the background's message-based fast path) persists
+    // stopRequested, well before the job actually finishes unwinding.
+    var isStopping = dsState.status === 'stopping';
+    // STALL-FIX ROUND 3 — poll only while there's real, active work to
+    // recover; stops itself the instant a real terminal state is reached
+    // (never leaks a timer past the job it was polling for).
+    ensureDetailPollTimer(!isTerminal);
+    els.dtProgressBadge.textContent = dsState.status.toUpperCase();
+    els.dtProgressBadge.className = 'ws-status-badge ws-status-' + dsState.status;
+    var c = dsState.counts || {};
+    var done = (c.completed || 0) + (c.partial || 0) + (c.failed || 0) + (c.skipped || 0);
+    var pct = c.total ? Math.round((done / c.total) * 100) : 0;
+    if (isStopping) {
+      els.dtProgressText.textContent = WSI18n.t('detail.stoppingSafely');
+    } else {
+      // Mission's own explicit progress example: "137 / 500 completed —
+      // Successful: 132, Missing: 3, Errors: 2" — 'partial' (page loaded,
+      // some/all fields empty) is this project's own honest distinct
+      // status; folded into "Missing" here to match the mission's exact
+      // vocabulary without inventing a 4th user-facing bucket.
+      // STALL-FIX mission's OWN explicit example additionally shows
+      // "Errors: 0 • Timeouts: 1" as two SEPARATE buckets — c.timeouts is
+      // already a subset of c.failed (see deepScrapeCounts), so it's
+      // subtracted out of the displayed "errors" count here, never from
+      // c.failed itself.
+      els.dtProgressText.textContent = WSI18n.t('detail.progressText', {
+        done: done, total: c.total || 0, success: c.completed || 0,
+        missing: (c.partial || 0) + (c.skipped || 0), errors: (c.failed || 0) - (c.timeouts || 0), timeouts: c.timeouts || 0, percent: pct
+      });
+    }
+    els.dtProgressCurrent.textContent = dsState.currentUrl ? WSI18n.t('detail.progressCurrent', { url: dsState.currentUrl }) : '';
+    els.dtStopBtn.hidden = isTerminal || isStopping;
+
+    var currentRecord = dsState.currentUrl && dsState.results ? dsState.results[dsState.currentUrl] : null;
+    var retryStatus = currentRecord && currentRecord.retryStatus;
+    if (els.dtRetryStatus) {
+      els.dtRetryStatus.hidden = !retryStatus;
+      els.dtRetryStatus.textContent = retryStatus || '';
+    }
+
+    if (dsState.status === 'error' && dsState.error) setStatus(dsState.error, true);
+
+    if (isTerminal) {
+      mergeDetailResults(dsState);
+      renderDetailSummary(dsState);
+      var stuckCount = Object.keys(dsState.results || {}).filter(function (url) {
+        var st = dsState.results[url].status;
+        return st === 'pending' || st === 'fetching';
+      }).length;
+      if (els.dtResumeBtn) els.dtResumeBtn.hidden = !(stuckCount > 0);
+      if (els.dtRetryFailedBtn) els.dtRetryFailedBtn.hidden = !(c.failed > 0);
+      if (els.dtNewRunBtn) els.dtNewRunBtn.hidden = false;
+      if (dsState.status === 'completed' && !detailChargedRunIds[dsState.runId]) {
+        detailChargedRunIds[dsState.runId] = true;
+        chargeRunCredit(dsState.runId);
+      }
+    } else {
+      if (els.dtResumeBtn) els.dtResumeBtn.hidden = true;
+      if (els.dtRetryFailedBtn) els.dtRetryFailedBtn.hidden = true;
+      if (els.dtNewRunBtn) els.dtNewRunBtn.hidden = true;
+    }
+  }
+
+  function renderDetailSummary(dsState) {
+    var c = dsState.counts || {};
+    var reasonCounts = {};
+    Object.keys(dsState.results || {}).forEach(function (url) {
+      var r = dsState.results[url];
+      if (r.status === 'failed' && r.error) reasonCounts[r.error] = (reasonCounts[r.error] || 0) + 1;
+    });
+    var topReasons = Object.keys(reasonCounts).sort(function (a, b) { return reasonCounts[b] - reasonCounts[a]; }).slice(0, 3);
+
+    var lines = [];
+    lines.push(dsState.status === 'stopped' ? WSI18n.t('detail.summaryStopped') : dsState.status === 'error' ? WSI18n.t('detail.summaryError') : WSI18n.t('detail.summaryComplete'));
+    lines.push((c.total || 0) + ' ' + WSI18n.t('detail.summaryPages'));
+    lines.push(WSI18n.t('detail.summaryCounts', { success: c.completed || 0, missing: (c.partial || 0) + (c.skipped || 0), errors: c.failed || 0 }));
+    if (topReasons.length) {
+      lines.push('');
+      lines.push(WSI18n.t('detail.summaryReasons'));
+      topReasons.forEach(function (reason) { lines.push('  ' + reasonCounts[reason] + ' × ' + reason); });
+    }
+    els.dtSummaryText.hidden = false;
+    els.dtSummaryText.textContent = lines.join('\n');
+  }
+
+  /** Merges by URL lookup — NEVER by row position (mission: mandatory) —
+   * mirrors mergeDeepScrapeResults' exact logic for detailColumns/
+   * rawRows instead of deepScrapeColumns/rawRows. A row outside the
+   * chosen scope (never had a job entry for its URL at all) simply gets
+   * no detail columns populated — never fabricated, never blocks the
+   * columns from existing for rows that WERE processed.
+   *
+   * STORAGE ARCHITECTURE FIX: the actual extracted field VALUES no
+   * longer live inline on dsState.results[url].fields — see
+   * mergeDeepScrapeResults' own updated comment for the full real-
+   * production-report reasoning (same fix, same ws_deepscrape_fields
+   * key, both merge functions read it the same way). */
+  async function mergeDetailResults(dsState) {
+    if (!detailConfig || !detailConfig.sourceColumnId || !dsState || !dsState.results) return;
+    var sourceColId = detailConfig.sourceColumnId;
+    var existingNames = {};
+    state.columns.forEach(function (c) { existingNames[c.name.trim().toLowerCase()] = true; });
+    deepScrapeColumns.forEach(function (c) { existingNames[c.name.trim().toLowerCase()] = true; });
+
+    detailColumns = (detailConfig.fields || []).map(function (f) {
+      var name = f.name;
+      if (existingNames[name.trim().toLowerCase()]) {
+        var n = 2;
+        var candidate = name + ' (detail)';
+        while (existingNames[candidate.trim().toLowerCase()]) { candidate = name + ' (detail ' + n + ')'; n++; }
+        name = candidate;
+      }
+      existingNames[name.trim().toLowerCase()] = true;
+      return { id: 'dt_' + f.id, name: name, sourceFieldId: f.id };
+    });
+
+    var fieldsMap = (await localGet('ws_deepscrape_fields')) || {};
+
+    rawRows.forEach(function (row) {
+      var url = row[sourceColId];
+      var record = url ? dsState.results[url] : null;
+      var fields = url ? fieldsMap[url] : null;
+      var hasData = record && (record.status === 'completed' || record.status === 'partial') && fields;
+      detailColumns.forEach(function (dtCol) {
+        if (!hasData) { if (!(dtCol.id in row)) row[dtCol.id] = ''; return; }
+        var raw = fields[dtCol.sourceFieldId];
+        row[dtCol.id] = Array.isArray(raw) ? raw.join('; ') : (raw || '');
+      });
+    });
+
+    invalidateTransformCache();
+    renderResults();
+  }
+
+  function attachDetailStorageListener() {
+    if (detailStorageListenerAttached) return;
+    detailStorageListenerAttached = true;
+    chrome.storage.onChanged.addListener(function (changes, areaName) {
+      if (areaName !== 'local' || !changes['ws_deepscrape_run']) return;
+      renderDetailProgress(changes['ws_deepscrape_run'].newValue);
     });
   }
 
@@ -8258,7 +9869,10 @@
     // must not lose an active background operation" guarantee every
     // other run type (Auto Scroll/Multi-page, ZIP downloads) already has.
     attachDeepScrapeStorageListener();
-    var existingDeepScrapeRun = await sessionGet('ws_deepscrape_run');
+    // DETAIL ENRICHMENT mission: now chrome.storage.local (see
+    // getDeepScrapeState's own comment in background.js) — localGet
+    // mirrors sessionGet's exact shape, just against the other area.
+    var existingDeepScrapeRun = await localGet('ws_deepscrape_run');
     if (existingDeepScrapeRun && ['running', 'stopped', 'completed', 'error'].indexOf(existingDeepScrapeRun.status) !== -1) {
       currentDeepScrapeRunId = existingDeepScrapeRun.runId;
       els.deepScrapePanel.hidden = true;
@@ -8281,6 +9895,49 @@
     if (els.dsStartBtn) els.dsStartBtn.addEventListener('click', handleDsStartClick);
     if (els.dsStopBtn) els.dsStopBtn.addEventListener('click', handleDsStopClick);
     if (els.dsRetryFailedBtn) els.dsRetryFailedBtn.addEventListener('click', handleDsRetryFailedClick);
+
+    // DETAIL ENRICHMENT mission (VERİ | SONUÇ | DETAY) — same restore-on-
+    // reopen guarantee as the OLD Deep Scrape block directly above, keyed
+    // to THIS side's own distinct runId prefix ('dse_') so a persisted
+    // run only ever restores into whichever UI actually started it.
+    await checkForPendingLiveDetailFieldPicks();
+    attachDetailStorageListener();
+    if (existingDeepScrapeRun && existingDeepScrapeRun.runId && existingDeepScrapeRun.runId.indexOf('dse_') === 0 &&
+      // STALL-FIX ROUND 3: 'stopping' added — a popup reopened WHILE a
+      // Stop request is still being honored must restore correctly too,
+      // not silently fail to restore because its status isn't in this list.
+      ['running', 'stopping', 'stopped', 'completed', 'error'].indexOf(existingDeepScrapeRun.status) !== -1) {
+      currentDetailRunId = existingDeepScrapeRun.runId;
+      if (els.dtSetupSection) els.dtSetupSection.hidden = true;
+      renderDetailProgress(existingDeepScrapeRun);
+    }
+    updateDetailTabAvailability();
+
+    if (els.dtSourceColumn) els.dtSourceColumn.addEventListener('change', function () { detailConfig.sourceColumnId = els.dtSourceColumn.value || null; updateDetailWorkloadSummary(); });
+    if (els.dtAddFieldBtn) els.dtAddFieldBtn.addEventListener('click', handleDtAddFieldClick);
+    if (els.dtFieldAttribute) els.dtFieldAttribute.addEventListener('change', handleDtFieldAttributeChange);
+    if (els.dtFieldSaveBtn) els.dtFieldSaveBtn.addEventListener('click', handleDtFieldSaveClick);
+    if (els.dtFieldCancelBtn) els.dtFieldCancelBtn.addEventListener('click', handleDtFieldCancelClick);
+    if (els.dtPickFieldsBtn) els.dtPickFieldsBtn.addEventListener('click', handleDtPickFieldsClick);
+    if (els.detailPickDiagCopyBtn) els.detailPickDiagCopyBtn.addEventListener('click', handleCopyDetailPickDiagnostic);
+    if (els.dtTestBtn) els.dtTestBtn.addEventListener('click', handleDtTestClick);
+    if (els.dtSaveTemplateBtn) els.dtSaveTemplateBtn.addEventListener('click', handleDtSaveTemplateClick);
+    if (els.dtLoadTemplateBtn) els.dtLoadTemplateBtn.addEventListener('click', handleDtLoadTemplateClick);
+    if (els.dtDeleteTemplateBtn) els.dtDeleteTemplateBtn.addEventListener('click', handleDtDeleteTemplateClick);
+    if (els.dtScopeAllBtn) els.dtScopeAllBtn.addEventListener('click', function () { setDetailScopeMode('all'); });
+    if (els.dtScopeFirst100Btn) els.dtScopeFirst100Btn.addEventListener('click', function () { setDetailScopeMode('first100'); });
+    if (els.dtScopeFirst500Btn) els.dtScopeFirst500Btn.addEventListener('click', function () { setDetailScopeMode('first500'); });
+    if (els.dtScopeFirstNBtn) els.dtScopeFirstNBtn.addEventListener('click', function () { setDetailScopeMode('firstn'); });
+    if (els.dtScopeSelectedBtn) els.dtScopeSelectedBtn.addEventListener('click', function () { setDetailScopeMode('selected'); });
+    if (els.dtScopeFirstNInput) els.dtScopeFirstNInput.addEventListener('input', handleDtScopeFirstNInput);
+    if (els.dtSelectAllBtn) els.dtSelectAllBtn.addEventListener('click', handleDtSelectAll);
+    if (els.dtClearSelectionBtn) els.dtClearSelectionBtn.addEventListener('click', handleDtClearSelection);
+    if (els.dtStartBtn) els.dtStartBtn.addEventListener('click', handleDetailStartClick);
+    if (els.dtStopBtn) els.dtStopBtn.addEventListener('click', handleDetailStopClick);
+    if (els.dtResumeBtn) els.dtResumeBtn.addEventListener('click', handleDetailResumeClick);
+    if (els.dtRetryFailedBtn) els.dtRetryFailedBtn.addEventListener('click', handleDetailRetryFailedClick);
+    if (els.dtNewRunBtn) els.dtNewRunBtn.addEventListener('click', handleDetailNewRunClick);
+    if (els.dtResetBtn) els.dtResetBtn.addEventListener('click', handleDetailResetClick);
 
     els.addColumnBtn.addEventListener('click', handleAddColumn);
     els.autoDetectBtn.addEventListener('click', handleAutoDetect);
@@ -8552,6 +10209,20 @@
     // matching every other dev/QA-only control in this project.
     if (els.autoDiagCopyBtn) els.autoDiagCopyBtn.addEventListener('click', handleCopyAutoDiagnostic);
     if (els.sessionDiagCopyBtn) els.sessionDiagCopyBtn.addEventListener('click', handleCopySessionDiagnostic);
+    // [WS-PAGE-DIAG] TEMPORARY — same dev-only reachability contract as
+    // the two lines above; #pagination-diag-panel (and therefore this
+    // button) stays `hidden` unless revealPaginationDiagPanelIfDev()
+    // confirms an unpacked/development install.
+    if (els.paginationDiagCopyBtn) els.paginationDiagCopyBtn.addEventListener('click', handleCopyPaginationDiagnostic);
+    // SELF-DIAGNOSTICS / HEALTH CHECK — same dev-only reachability
+    // contract as the two lines above; #health-check-panel (and
+    // therefore these buttons) stays `hidden` unless
+    // revealHealthCheckPanelIfDev() confirms an unpacked/development
+    // install.
+    if (els.healthCheckRunBtn) els.healthCheckRunBtn.addEventListener('click', computeAndRenderHealthCheck);
+    if (els.healthCheckCopyReportBtn) els.healthCheckCopyReportBtn.addEventListener('click', handleCopyHealthReport);
+    if (els.healthCheckCopyHistoryBtn) els.healthCheckCopyHistoryBtn.addEventListener('click', handleCopyHealthHistory);
+    if (els.healthCheckClearBtn) els.healthCheckClearBtn.addEventListener('click', handleClearHealthDiagnostics);
     if (els.researchGoScrapeBtn) els.researchGoScrapeBtn.addEventListener('click', function () { switchTab('scrape'); });
 
     // V1.14/V1.15/V1.16: Settings / trial-complete modal / recovery wiring.

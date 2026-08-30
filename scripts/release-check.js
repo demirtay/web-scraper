@@ -299,6 +299,80 @@ function main() {
     return diagControlIds.length + ' diagnostic controls confirmed gated inside #session-diag-panel, reveal path confirmed to check isDevelopmentInstall()';
   });
 
+  // ---- Same reachability contract, mirrored for the pagination
+  // diagnostic ring buffer's own dev-only tool ("Copy Pagination
+  // Diagnostic") — added for the real production report of main
+  // discovery stalling on page 11; reads content/discovery.js's own
+  // persistent chrome.storage.local ring buffer directly. ----
+  check('Pagination diagnostic tool is not reachable outside the isDevelopmentInstall()-gated panel', function () {
+    var html = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.html'), 'utf8');
+    if (!/<div id="pagination-diag-panel" hidden/.test(html)) throw new Error('#pagination-diag-panel is not `hidden` by default in the shipped HTML');
+    var diagPanelMatch = html.match(/<div id="pagination-diag-panel"[^>]*>[\s\S]*?<\/div>\s*\n\s*<!--/);
+    if (!diagPanelMatch) throw new Error('could not find the #pagination-diag-panel container in popup.html');
+    var diagPanelHtml = diagPanelMatch[0];
+    var diagControlIds = ['pagination-diag-copy-btn', 'pagination-diag-status', 'pagination-diag-textarea'];
+    diagControlIds.forEach(function (id) {
+      var re = new RegExp('id="' + id + '"', 'g');
+      var totalCount = (html.match(re) || []).length;
+      var insideCount = (diagPanelHtml.match(re) || []).length;
+      if (totalCount === 0) throw new Error('expected diagnostic control "' + id + '" was not found at all — has the harness moved?');
+      if (totalCount !== insideCount) throw new Error('diagnostic control "' + id + '" appears OUTSIDE the gated #pagination-diag-panel container — this is a production exposure risk');
+    });
+
+    var popupJs = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.js'), 'utf8');
+    if (!/function revealPaginationDiagPanelIfDev[\s\S]{0,300}isDevelopmentInstall/.test(popupJs)) {
+      throw new Error('revealPaginationDiagPanelIfDev() no longer visibly gates on WSLicense.isDevelopmentInstall() — the diagnostic panel could become reachable in production');
+    }
+    ['handleCopyPaginationDiagnostic', 'formatPaginationDiagnosticReport'].forEach(function (fn) {
+      ['background/background.js'].forEach(function (rel) {
+        var abs = path.join(PROJECT_ROOT, rel);
+        if (!fs.existsSync(abs)) return;
+        var src = fs.readFileSync(abs, 'utf8');
+        if (src.indexOf(fn) !== -1) throw new Error(fn + ' is referenced from ' + rel + ' — the diagnostic tool must only ever be reachable from the gated popup UI');
+      });
+    });
+    return diagControlIds.length + ' diagnostic controls confirmed gated inside #pagination-diag-panel, reveal path confirmed to check isDevelopmentInstall()';
+  });
+
+  // ---- Same reachability contract, mirrored for the SELF-DIAGNOSTICS /
+  // HEALTH CHECK ("Sağlık Kontrolü") dev-only tool — mission item 12's
+  // own explicit "production/store build hides all development-only
+  // diagnostic UI" test proof for this panel. ----
+  check('Health Check diagnostic tool is not reachable outside the isDevelopmentInstall()-gated panel', function () {
+    var html = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.html'), 'utf8');
+    if (!/<div id="health-check-panel" hidden/.test(html)) throw new Error('#health-check-panel is not `hidden` by default in the shipped HTML');
+    var diagPanelMatch = html.match(/<div id="health-check-panel"[^>]*>[\s\S]*?<\/div>\s*\n\s*<!--/);
+    if (!diagPanelMatch) throw new Error('could not find the #health-check-panel container in popup.html');
+    var diagPanelHtml = diagPanelMatch[0];
+    var diagControlIds = [
+      'health-check-run-btn', 'health-check-copy-report-btn', 'health-check-copy-history-btn', 'health-check-clear-btn',
+      'health-check-overall', 'health-check-main', 'health-check-pagination', 'health-check-ui-sync',
+      'health-check-storage', 'health-check-detail', 'health-check-last-progress', 'health-check-current-page',
+      'health-check-result-count', 'health-check-last-issue', 'health-check-status', 'health-check-textarea'
+    ];
+    diagControlIds.forEach(function (id) {
+      var re = new RegExp('id="' + id + '"', 'g');
+      var totalCount = (html.match(re) || []).length;
+      var insideCount = (diagPanelHtml.match(re) || []).length;
+      if (totalCount === 0) throw new Error('expected diagnostic control "' + id + '" was not found at all — has the harness moved?');
+      if (totalCount !== insideCount) throw new Error('diagnostic control "' + id + '" appears OUTSIDE the gated #health-check-panel container — this is a production exposure risk');
+    });
+
+    var popupJs = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.js'), 'utf8');
+    if (!/function revealHealthCheckPanelIfDev[\s\S]{0,300}isDevelopmentInstall/.test(popupJs)) {
+      throw new Error('revealHealthCheckPanelIfDev() no longer visibly gates on WSLicense.isDevelopmentInstall() — the diagnostic panel could become reachable in production');
+    }
+    ['handleCopyHealthReport', 'handleCopyHealthHistory', 'handleClearHealthDiagnostics', 'gatherHealthCheckInput'].forEach(function (fn) {
+      ['background/background.js'].forEach(function (rel) {
+        var abs = path.join(PROJECT_ROOT, rel);
+        if (!fs.existsSync(abs)) return;
+        var src = fs.readFileSync(abs, 'utf8');
+        if (src.indexOf(fn) !== -1) throw new Error(fn + ' is referenced from ' + rel + ' — the diagnostic tool must only ever be reachable from the gated popup UI');
+      });
+    });
+    return diagControlIds.length + ' diagnostic controls confirmed gated inside #health-check-panel, reveal path confirmed to check isDevelopmentInstall()';
+  });
+
   // ---- V1 FINAL PART B spec #45: automated translation-coverage audit.
   // Loads the real catalog files in a throwaway sandbox (no chrome.*
   // needed — WSI18n.coverageReport() is pure) and reports per-locale

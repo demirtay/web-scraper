@@ -82,10 +82,50 @@
       chrome.storage.local.get([key], function (result) { resolve((result && result[key]) || null); });
     });
   }
+  /** CORE RECOVERY MISSION — REAL BUG FOUND AND FIXED: this write path
+   * previously resolved unconditionally regardless of whether the write
+   * actually landed. A real chrome.storage.local.set() failure (most
+   * concretely: `Resource::kQuotaBytes quota exceeded` — the exact real
+   * production error this project already fixed in utils/license.js's
+   * own persist() and background.js's setDeepScrapeState()/
+   * setDeepScrapeFields(), but never here) previously resolved this
+   * promise as if the write had succeeded: the in-memory `session` the
+   * loop was holding would show the new state, but chrome.storage.local
+   * still held the STALE prior value — and since almost every step of
+   * runDiscoveryLoop() re-reads via getSession() immediately afterward,
+   * a single silently-dropped write could desync the loop from its own
+   * persisted state indefinitely, or leave the popup (which only ever
+   * observes storage, never the content script's own memory) frozen on
+   * stale progress forever while discovery.status stayed 'discovering'
+   * in storage — matching the real reported symptom class exactly
+   * ("UI freezing while the engine continued navigating" / "stuck, no
+   * further progress"). Now follows the SAME established chrome.runtime.
+   * lastError contract every other storage-write helper in this project
+   * already uses. `err.isStorageWriteError` lets runDiscoveryLoopSafe's
+   * own recovery path (below) give an honest, SPECIFIC stopReason
+   * ("storage-write-failed: <real message>") instead of a generic
+   * "internal-error", satisfying "surface the real storage error to the
+   * UI/health check" — discovery.stopReason is already read verbatim by
+   * both popup.js's renderDiscoveryUI() and WSHealthCheck.
+   * computeHealthSummary()'s FAILED/'error' branch, so no further UI/
+   * Health Check wiring is needed for this fix to become visible there.
+   * The SUCCESS path is completely unchanged (still resolves with no
+   * value) — every existing `await setSession(...)` call site keeps
+   * working exactly as before when a write genuinely lands. */
   function setSession(host, session) {
     var data = {};
     data[sessionKey(host)] = session;
-    return new Promise(function (resolve) { chrome.storage.local.set(data, resolve); });
+    return new Promise(function (resolve, reject) {
+      chrome.storage.local.set(data, function () {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          var err = new Error(chrome.runtime.lastError.message || 'chrome.storage.local write failed.');
+          err.isStorageWriteError = true;
+          reject(err);
+          return;
+        }
+        resolve();
+      });
+    });
   }
 
   var currentAbortController = null;
@@ -152,6 +192,132 @@
       var sample = first ? (first.textContent || '').trim().slice(0, 200) : (document.body ? document.body.textContent.trim().slice(0, 200) : '');
       return count + ':' + sample.length + ':' + sample;
     } catch (e) { return 'error:' + (e && e.message); }
+  }
+
+  /** [WS-PAGE-DIAG] TEMPORARY, dev-only PERSISTENT diagnostic ring buffer.
+   * Real production report: the page's own DevTools console is destroyed
+   * on every real pagination navigation, making the existing console.log
+   * [WS-PAGE-DIAG] markers alone impractical to chase across an 11-page
+   * real Etsy run without perfectly-timed "Preserve log". Every existing
+   * console.log/console.error [WS-PAGE-DIAG] call site below ALSO calls
+   * pushPageDiag() — same stage, same moment — persisting one COMPACT
+   * entry into chrome.storage.local under a single fixed key (never keyed
+   * by runId/session — mirrors ws_deepscrape_fields's own "single fixed
+   * key" convention). chrome.storage.local, unlike the console or any
+   * in-memory variable, genuinely survives a real navigation (a fresh
+   * content-script instance is a brand-new script context with its own
+   * fresh closures, but it reads/writes the SAME browser-side storage),
+   * so the full page-1..page-11 sequence stays readable afterward from
+   * the popup's own dev-only "Copy Pagination Diagnostic" panel — no
+   * DevTools timing required at all.
+   *
+   * Deliberately fire-and-forget from every call site (never awaited) and
+   * fully try/catch-wrapped end to end: a write failure here (quota, a
+   * lost race, anything) must NEVER be able to affect discovery/
+   * pagination behavior itself — this stays a pure, best-effort side
+   * channel, exactly like this file's own existing raceData fire-and-
+   * forget write in wrappedTrigger above. Writes are serialized through
+   * `pageDiagQueue` (a simple chained-promise queue) purely so a burst of
+   * same-tick pushes cannot race each other's read-modify-write and lose
+   * entries — NOT for correctness discovery itself depends on.
+   *
+   * Never stores DOM/HTML/rows/screenshots — only the small fixed fields
+   * below, and sanitizeDiagEntry() below hard-truncates/rejects the
+   * (never expected) case of a caller accidentally handing this an
+   * oversized value, so one bad call site can never blow up the buffer. */
+  var PAGINATION_DIAG_KEY = 'ws_pagination_diag';
+  var PAGINATION_DIAG_MAX_ENTRIES = 100;
+  var PAGE_DIAG_ENTRY_MAX_BYTES = 2000;
+  var pageDiagQueue = Promise.resolve();
+
+  /** Strips a lastPaginationAttempt-shaped object down to the small,
+   * fixed set of fields worth keeping in the diagnostic buffer —
+   * deliberately EXCLUDES fingerprintBefore/fingerprintAfter (which carry
+   * up to 200 chars of real page text) so the ring buffer can never end
+   * up holding page content, only pagination bookkeeping. */
+  function summarizeAttempt(attemptDiag) {
+    if (!attemptDiag) return null;
+    return {
+      method: attemptDiag.method || null,
+      found: !!attemptDiag.nextCandidateFound,
+      disabled: !!attemptDiag.disabled,
+      issued: !!attemptDiag.paginationActionIssued,
+      succeeded: !!attemptDiag.paginationActionSucceeded,
+      outcome: attemptDiag.outcome || null,
+      fromUrl: attemptDiag.fromUrl || null,
+      toUrl: attemptDiag.toUrl || null,
+      uniqueBefore: typeof attemptDiag.uniqueBefore === 'number' ? attemptDiag.uniqueBefore : null,
+      uniqueAfter: typeof attemptDiag.uniqueAfter === 'number' ? attemptDiag.uniqueAfter : null
+    };
+  }
+
+  /** Defensive backstop for requirement "the buffer MUST stay small / do
+   * not store large objects": if a single entry ever exceeds
+   * PAGE_DIAG_ENTRY_MAX_BYTES (never expected in normal operation — every
+   * real call site below only ever passes short strings/small summary
+   * objects), this drops everything except the fixed small fields and a
+   * hard-truncated reason, rather than ever letting an oversized entry
+   * into the ring buffer. */
+  function sanitizeDiagEntry(entry) {
+    try {
+      var json = JSON.stringify(entry);
+      if (json.length <= PAGE_DIAG_ENTRY_MAX_BYTES) return entry;
+      return {
+        t: entry.t, stage: entry.stage,
+        url: typeof entry.url === 'string' ? entry.url.slice(0, 300) : null,
+        page: entry.page, discoveryStatus: entry.discoveryStatus,
+        reason: typeof entry.reason === 'string' ? entry.reason.slice(0, 200) + '…[truncated — entry exceeded ' + PAGE_DIAG_ENTRY_MAX_BYTES + ' bytes]' : null,
+        attempt: null,
+        truncated: true
+      };
+    } catch (e) { return { t: entry && entry.t, stage: 'sanitize-error', truncated: true }; }
+  }
+
+  /** stage: short string label. meta: { page, discoveryStatus, reason,
+   * attempt } — every field optional, all deliberately small/compact
+   * (see file-header comment above). Never throws, never returns a
+   * promise the caller is expected to await. */
+  function pushPageDiag(stage, meta) {
+    try {
+      meta = meta || {};
+      var entry = sanitizeDiagEntry({
+        t: Date.now(),
+        stage: stage,
+        url: (function () { try { return location.href; } catch (e2) { return null; } })(),
+        page: typeof meta.page === 'number' ? meta.page : null,
+        discoveryStatus: meta.discoveryStatus || null,
+        reason: meta.reason || null,
+        attempt: meta.attempt || null
+      });
+      pageDiagQueue = pageDiagQueue.then(function () {
+        return new Promise(function (resolve) {
+          try {
+            chrome.storage.local.get([PAGINATION_DIAG_KEY], function (result) {
+              try {
+                var existing = (result && result[PAGINATION_DIAG_KEY] && result[PAGINATION_DIAG_KEY].entries) || [];
+                var buf = existing.concat([entry]);
+                if (buf.length > PAGINATION_DIAG_MAX_ENTRIES) buf = buf.slice(buf.length - PAGINATION_DIAG_MAX_ENTRIES);
+                var data = {};
+                data[PAGINATION_DIAG_KEY] = { schemaVersion: 1, entries: buf };
+                chrome.storage.local.set(data, function () { resolve(); });
+              } catch (e3) { resolve(); }
+            });
+          } catch (e4) { resolve(); }
+        });
+      }).catch(function () { /* never let one failed write poison future pushes */ });
+    } catch (e) { /* diagnostic-only — must NEVER break discovery */ }
+  }
+
+  /** Wipes the persistent diagnostic buffer — called ONLY when a
+   * genuinely NEW main scrape starts (START_DISCOVERY handler, below), so
+   * every run gets its own clean trace instead of a previous run's tail
+   * mixing into a new run's head. */
+  function clearPaginationDiagBuffer() {
+    try {
+      var data = {};
+      data[PAGINATION_DIAG_KEY] = { schemaVersion: 1, entries: [] };
+      chrome.storage.local.set(data);
+    } catch (e) { /* best-effort */ }
   }
 
   /** Local copy of the same extract -> classify -> dedupe/merge primitive
@@ -319,15 +485,30 @@
     while (true) {
       iterations++;
       if (iterations > MAX_LOOP_ITERATIONS) {
+        console.log('[WS-PAGE-DIAG] STAGE 16/18: max-loop-iterations-safety-limit reached (', iterations, '>', MAX_LOOP_ITERATIONS, ') — finalizing STOPPED, loop will NOT re-enter. (Extremely unlikely to be the page-11 cause — this requires ~6000 loop iterations, not 11 pages.)');
         var runaway = await getSession(host);
+        pushPageDiag('STAGE 16/18 max-loop-iterations-safety-limit', { page: runaway && runaway.discovery && runaway.discovery.pagesVisited, discoveryStatus: runaway && runaway.discovery && runaway.discovery.status, reason: 'max-loop-iterations-safety-limit' });
         if (stillRunning(runaway)) await finalizeStopped(runaway, host, 'max-loop-iterations-safety-limit', true);
         return;
       }
 
       var session = await getSession(host);
-      if (!stillRunning(session)) return;
+      if (!stillRunning(session)) {
+        console.log('[WS-PAGE-DIAG] STAGE 1: session no longer running at top of loop (stopped/finished elsewhere) — loop returning, will NOT re-enter.');
+        pushPageDiag('STAGE 1 loop-top-not-running', { page: session && session.discovery && session.discovery.pagesVisited, discoveryStatus: session && session.discovery && session.discovery.status, reason: 'session-not-running' });
+        return;
+      }
       session = ensureInternalEngines(session);
       var cs = session.scraperConfig.containerSelector;
+
+      // [WS-PAGE-DIAG] TEMPORARY — real production report: main
+      // discovery stuck at page 11 ("11 sayfa tarandı", status still
+      // "Ek veri taranıyor..."). STAGE 1/2/3: page processing started /
+      // current URL / current unique row count. Fires on EVERY loop
+      // iteration — filter the real page's console by "[WS-PAGE-DIAG]"
+      // to see the full sequence.
+      console.log('[WS-PAGE-DIAG] STAGE 1/2/3: iteration', iterations, 'started. url=', location.href, 'uniqueRows=', session.rows.length, 'pagesVisited=', session.discovery.pagesVisited, 'discoveryStatus=', session.discovery.status);
+      pushPageDiag('STAGE 1/2/3', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status });
 
       if (firstIteration && skipInitialScrape) {
         // Page 1 was already scraped AND merged by popup.js's BAŞLA
@@ -431,7 +612,11 @@
         var stateId = root.WSDiscoveryCore.buildTraversalStateId(location.href, signature, session.rows.length);
         var looped = root.WSDiscoveryCore.registerVisitedState(session.discovery, stateId);
         await setSession(host, session);
-        if (looped) { await finalizeComplete(session, host, 'traversal-loop-detected'); return; }
+        if (looped) {
+          console.log('[WS-PAGE-DIAG] STAGE 16/18: traversal-loop-detected — finalizing COMPLETE, loop will NOT re-enter.');
+          pushPageDiag('STAGE 16/18 traversal-loop-detected', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'traversal-loop-detected' });
+          await finalizeComplete(session, host, 'traversal-loop-detected'); return;
+        }
 
         console.log(LOG_PREFIX, 'page scraped', { pagesVisited: session.discovery.pagesVisited, newRows: passResult.newUniqueCount, totalUnique: session.rows.length, url: location.href });
       }
@@ -447,13 +632,21 @@
       var beforeScrollUnique = session.rows.length;
       var beforeScrollCandidates = candidateCount(cs);
       var cyclesBefore = session.autoScroll.cycleCount;
+      console.log('[WS-PAGE-DIAG] STAGE 4: auto-scroll starting. beforeScrollUnique=', beforeScrollUnique, 'beforeScrollCandidates=', beforeScrollCandidates);
+      pushPageDiag('STAGE 4', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status });
       session = await root.WSAutoScroll.runUntilExhausted(session, host, controller, true);
-      if (!stillRunning(session)) return;
+      if (!stillRunning(session)) {
+        console.log('[WS-PAGE-DIAG] STAGE 5: auto-scroll — session no longer running (stopped/finished elsewhere), loop returning.');
+        pushPageDiag('STAGE 5 not-running', { reason: 'session-not-running-during-autoscroll' });
+        return;
+      }
       session.discovery.scrollCycles += Math.max(0, session.autoScroll.cycleCount - cyclesBefore);
       var afterScrollCandidates = candidateCount(cs);
       session.discovery = root.WSDiscoveryCore.recordExpansionDelta(session.discovery, beforeScrollCandidates, afterScrollCandidates, beforeScrollUnique, session.rows.length);
       if (session.rows.length > beforeScrollUnique) session.discovery.currentTraversalMethod = 'scroll';
       await setSession(host, session);
+      console.log('[WS-PAGE-DIAG] STAGE 5: auto-scroll finished. stopReason=', session.autoScroll.stopReason, 'cycleCount=', session.autoScroll.cycleCount, 'cyclesThisPass=', session.autoScroll.cycleCount - cyclesBefore, 'rowsNow=', session.rows.length);
+      pushPageDiag('STAGE 5', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: session.autoScroll.stopReason });
 
       // ---- STEP 3: Load More to exhaustion (new, this mission) ----
       session = await getSession(host);
@@ -465,15 +658,25 @@
       var beforeLmUnique = session.rows.length;
       var beforeLmCandidates = candidateCount(cs);
       var clicksBefore = session.loadMoreAuto.clickCount;
+      console.log('[WS-PAGE-DIAG] STAGE 6: load-more detection starting. beforeLmUnique=', beforeLmUnique, 'beforeLmCandidates=', beforeLmCandidates);
+      pushPageDiag('STAGE 6', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status });
       session = await root.WSLoadMore.runUntilExhausted(session, host, controller, true);
-      if (!stillRunning(session)) return;
+      if (!stillRunning(session)) {
+        console.log('[WS-PAGE-DIAG] STAGE 7/8/9: load-more — session no longer running (stopped/finished elsewhere), loop returning.');
+        pushPageDiag('STAGE 7/8/9 not-running', { reason: 'session-not-running-during-loadmore' });
+        return;
+      }
       session.discovery.loadMoreActions += Math.max(0, session.loadMoreAuto.clickCount - clicksBefore);
       var afterLmCandidates = candidateCount(cs);
       session.discovery = root.WSDiscoveryCore.recordExpansionDelta(session.discovery, beforeLmCandidates, afterLmCandidates, beforeLmUnique, session.rows.length);
       if (session.rows.length > beforeLmUnique) session.discovery.currentTraversalMethod = 'load-more';
       session.discovery.totalCycles = session.discovery.scrollCycles + session.discovery.loadMoreActions;
       await setSession(host, session);
+      console.log('[WS-PAGE-DIAG] STAGE 7/8/9: load-more finished. stopReason=', session.loadMoreAuto.stopReason, 'clickCount=', session.loadMoreAuto.clickCount, 'clicksIssuedThisPass=', session.loadMoreAuto.clickCount - clicksBefore, '(clicksIssuedThisPass > 0 means a real load-more candidate was found AND clicked)', 'rowsNow=', session.rows.length);
+      pushPageDiag('STAGE 7/8/9', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: session.loadMoreAuto.stopReason });
       if (session.discovery.totalCycles >= session.discovery.maxTotalCycles) {
+        console.log('[WS-PAGE-DIAG] STAGE 16/18: max-total-cycles-safety-limit reached — finalizing STOPPED, loop will NOT re-enter.');
+        pushPageDiag('STAGE 16/18 max-total-cycles-safety-limit', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'max-total-cycles-safety-limit' });
         await finalizeStopped(session, host, 'max-total-cycles-safety-limit', true);
         return;
       }
@@ -494,8 +697,12 @@
       // control's own trigger function — proving the extension itself
       // caused the transition, never merely observed one that happened on
       // its own (a manual click, an unrelated timer, etc.).
+      console.log('[WS-PAGE-DIAG] STAGE 10: next-page detection starting. containerSelector=', cs);
+      pushPageDiag('STAGE 10', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status });
       var nextInfo;
       try { nextInfo = root.WSNextDetect.findNextControl(cs); } catch (e) { nextInfo = { found: false }; }
+      console.log('[WS-PAGE-DIAG] STAGE 11/12: next-page detection result. found=', nextInfo.found, 'method=', nextInfo.method, 'disabled=', nextInfo.disabled);
+      pushPageDiag('STAGE 11/12', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: nextInfo.method, attempt: { method: nextInfo.method || null, found: !!nextInfo.found, disabled: !!nextInfo.disabled, issued: false, succeeded: false, outcome: null, fromUrl: null, toUrl: null, uniqueBefore: null, uniqueAfter: null } });
       var attemptDiag = {
         at: Date.now(),
         nextCandidateFound: !!nextInfo.found,
@@ -516,6 +723,8 @@
         session.discovery.lastPaginationAttempt = attemptDiag;
         await setSession(host, session);
         console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        console.log('[WS-PAGE-DIAG] STAGE 16/17/18: no-next-candidate — finalizing COMPLETE, loop will NOT re-enter. lastPaginationAttempt=', JSON.stringify(attemptDiag));
+        pushPageDiag('STAGE 16/17/18 no-next-candidate', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'no-next-candidate', attempt: summarizeAttempt(attemptDiag) });
         await finalizeComplete(session, host, 'no-more-mechanisms');
         return;
       }
@@ -524,6 +733,8 @@
         session.discovery.lastPaginationAttempt = attemptDiag;
         await setSession(host, session);
         console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        console.log('[WS-PAGE-DIAG] STAGE 16/17/18: next-disabled — finalizing COMPLETE, loop will NOT re-enter. lastPaginationAttempt=', JSON.stringify(attemptDiag));
+        pushPageDiag('STAGE 16/17/18 next-disabled', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'next-disabled', attempt: summarizeAttempt(attemptDiag) });
         await finalizeComplete(session, host, 'next-disabled');
         return;
       }
@@ -533,6 +744,8 @@
         session.discovery.lastPaginationAttempt = attemptDiag;
         await setSession(host, session);
         console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        console.log('[WS-PAGE-DIAG] STAGE 16/17/18: max-pages-safety-limit — finalizing STOPPED, loop will NOT re-enter. pagesVisited=', session.discovery.pagesVisited, 'maxPages=', session.discovery.maxPages);
+        pushPageDiag('STAGE 16/17/18 max-pages-safety-limit', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'max-pages-safety-limit', attempt: summarizeAttempt(attemptDiag) });
         await finalizeStopped(session, host, 'max-pages-safety-limit', true);
         return;
       }
@@ -564,6 +777,11 @@
       var wrappedTrigger = function () {
         attemptDiag.paginationActionIssued = true;
         console.log(LOG_PREFIX, 'ISSUING pagination action (extension-driven, no user click involved)', { method: nextInfo.method, fromUrl: urlBefore });
+        console.log('[WS-PAGE-DIAG] STAGE 13: pagination trigger issued. method=', nextInfo.method, 'fromUrl=', urlBefore);
+        // Pushed BEFORE the trigger call below, same reasoning as the
+        // raceData write two lines down: a real navigation can destroy
+        // this instance in the same synchronous tick the trigger fires.
+        pushPageDiag('STAGE 13', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: nextInfo.method, attempt: summarizeAttempt(attemptDiag) });
         // Fire-and-forget, deliberately NOT awaited (there is no
         // synchronous opportunity to await anything between "decide to
         // trigger" and "actually trigger" — see the comment above): a raw
@@ -603,12 +821,18 @@
         }
       };
       await setSession(host, session);
+      console.log('[WS-PAGE-DIAG] STAGE 14: navigation/mutation wait starting. urlBefore=', urlBefore, 'timeoutMs=', NAV_TIMEOUT_MS);
+      pushPageDiag('STAGE 14', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'navigation-wait-starting' });
       var navResult = await root.WSDomWait.waitForNavigationOrMutation({
         timeoutMs: NAV_TIMEOUT_MS, urlBefore: urlBefore, signal: controller.signal, trigger: wrappedTrigger
       });
+      console.log('[WS-PAGE-DIAG] STAGE 15: navigation/mutation wait resolved. result=', navResult, '(one of url-changed | dom-changed | timeout | aborted)');
+      pushPageDiag('STAGE 15', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: navResult });
       if (navResult === 'aborted') {
         attemptDiag.outcome = 'aborted';
         console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        console.log('[WS-PAGE-DIAG] STAGE 16/18: aborted (real Stop) — loop returning, will NOT re-enter.');
+        pushPageDiag('STAGE 16/18 aborted', { reason: 'aborted-by-stop', attempt: summarizeAttempt(attemptDiag) });
         return;
       }
 
@@ -617,6 +841,8 @@
         attemptDiag.toUrl = location.href;
         attemptDiag.fingerprintAfter = diagFingerprint(cs);
         console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+        console.log('[WS-PAGE-DIAG] STAGE 15/16/17: navigation TIMED OUT — neither a URL change nor a DOM mutation was ever observed within', NAV_TIMEOUT_MS, 'ms of issuing the trigger. THIS IS THE MOST LIKELY EXPLANATION for "stuck, no further progress, status still discovering until finalizeStopped runs below". lastPaginationAttempt=', JSON.stringify(attemptDiag));
+        pushPageDiag('STAGE 15/16/17 timeout', { reason: 'navigation-timeout', attempt: summarizeAttempt(attemptDiag) });
         // A timeout means NO navigation was ever observed — unlike the
         // url-changed/dom-changed branches below, this script instance is
         // guaranteed still alive (nothing destroyed it), so — unlike
@@ -629,7 +855,14 @@
           stalled.discovery.lastPaginationAttempt = attemptDiag;
           await setSession(host, stalled);
         }
-        if (stillRunning(stalled)) await finalizeStopped(stalled, host, 'page-load-timeout');
+        if (stillRunning(stalled)) {
+          console.log('[WS-PAGE-DIAG] STAGE 16/18: page-load-timeout — finalizing STOPPED, loop will NOT re-enter. discoveryStatus was=', stalled.discovery && stalled.discovery.status);
+          pushPageDiag('STAGE 16/18 page-load-timeout', { page: stalled.discovery && stalled.discovery.pagesVisited, discoveryStatus: stalled.discovery && stalled.discovery.status, reason: 'page-load-timeout' });
+          await finalizeStopped(stalled, host, 'page-load-timeout');
+        } else {
+          console.log('[WS-PAGE-DIAG] STAGE 16/18: page-load-timeout, but session was already no-longer-running (stopped/finished elsewhere) — no finalize call made here.');
+          pushPageDiag('STAGE 16/18 page-load-timeout-not-running', { reason: 'page-load-timeout-session-already-terminal' });
+        }
         return;
       }
 
@@ -647,12 +880,16 @@
         if (!root.WSRunState.isSameOrigin(newUrl, session.hostname)) {
           session.discovery.lastPaginationAttempt = attemptDiag;
           console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+          console.log('[WS-PAGE-DIAG] STAGE 16/18: origin-changed (newUrl=' + newUrl + ') — finalizing COMPLETE, loop will NOT re-enter.');
+          pushPageDiag('STAGE 16/18 origin-changed', { reason: 'origin-changed', attempt: summarizeAttempt(attemptDiag) });
           await finalizeComplete(session, host, 'origin-changed');
           return;
         }
         if (session.discovery.visitedUrls.indexOf(newUrl) !== -1) {
           session.discovery.lastPaginationAttempt = attemptDiag;
           console.log(LOG_PREFIX, 'PAGINATION ATTEMPT', attemptDiag);
+          console.log('[WS-PAGE-DIAG] STAGE 16/18: url-repeat (newUrl=' + newUrl + ' already visited) — finalizing COMPLETE, loop will NOT re-enter. THIS IS A PLAUSIBLE EXPLANATION if the "next" control on page 11 resolves back to an already-seen URL.');
+          pushPageDiag('STAGE 16/18 url-repeat', { reason: 'url-repeat', attempt: summarizeAttempt(attemptDiag) });
           await finalizeComplete(session, host, 'url-repeat');
           return;
         }
@@ -663,6 +900,8 @@
         session.discovery = root.WSDiscoveryCore.onPageAdvance(session.discovery);
         session.discovery.lastPaginationAttempt = attemptDiag;
         console.log(LOG_PREFIX, 'PAGINATION ATTEMPT (real navigation confirmed — new page instance resumes)', attemptDiag);
+        console.log('[WS-PAGE-DIAG] STAGE 16/18: url-changed SUCCESS, newUrl=', newUrl, '— THIS instance ends here; a FRESH content-script instance on the new page is expected to bootstrap-resume (see the bottom of this file). If [WS-PAGE-DIAG] STAGE 1 never appears again after this line in the real console, the fresh instance never bootstrapped — see this file\'s own bootstrap block\'s getSession()/stillRunning() check.');
+        pushPageDiag('STAGE 16/18 url-changed-success', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'url-changed', attempt: summarizeAttempt(attemptDiag) });
         await setSession(host, session);
         // A real navigation just destroyed (or is about to destroy) this
         // script instance — the freshly-injected instance on the new page
@@ -680,6 +919,8 @@
       session.discovery = root.WSDiscoveryCore.onPageAdvance(session.discovery);
       session.discovery.lastPaginationAttempt = attemptDiag;
       console.log(LOG_PREFIX, 'PAGINATION ATTEMPT (SPA-style content swap confirmed)', attemptDiag);
+      console.log('[WS-PAGE-DIAG] STAGE 16/18: dom-changed SUCCESS — SAME instance loops back around to STAGE 1 for the new content, no bootstrap needed.');
+      pushPageDiag('STAGE 16/18 dom-changed-success', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'dom-changed', attempt: summarizeAttempt(attemptDiag) });
       await setSession(host, session);
     }
   }
@@ -710,7 +951,22 @@
     }
     return loopPromise.catch(function (err) {
       var msg = (err && err.message) || String(err);
+      // CORE RECOVERY MISSION — setSession() now rejects on a genuine
+      // chrome.storage.local write failure (see its own header comment)
+      // instead of silently resolving. That rejection reaches THIS exact
+      // catch, same as any other uncaught exception in the loop — but is
+      // tagged (err.isStorageWriteError) so the recorded stopReason below
+      // honestly says "storage-write-failed", not a generic
+      // "internal-error", surfacing the REAL cause to popup.js's
+      // renderDiscoveryUI() and WSHealthCheck.computeHealthSummary()
+      // (both already read discovery.stopReason verbatim for the
+      // 'error' status — no further UI/Health Check change needed).
+      var isStorageWriteError = !!(err && err.isStorageWriteError);
+      var stopReasonPrefix = isStorageWriteError ? 'storage-write-failed' : 'internal-error';
+      var stopReason = stopReasonPrefix + ': ' + msg;
       console.error(LOG_PREFIX, 'runDiscoveryLoop THREW — discovery loop terminated unexpectedly:', msg, err && err.stack);
+      console.error('[WS-PAGE-DIAG] STAGE 16/18: runDiscoveryLoop THREW an uncaught exception — this is a DIRECT, alternative explanation for "stuck, no [WS-PAGE-DIAG] logs after a certain point": ' + msg);
+      pushPageDiag(isStorageWriteError ? 'STAGE 16/18 storage-write-failed' : 'STAGE 16/18 uncaught-exception', { reason: stopReason });
       return getSession(host).then(function (session) {
         if (!session || !session.discovery) return;
         // Never clobber a real terminal state (complete/stopped) that a
@@ -718,12 +974,28 @@
         // same "only write if still discovering" guard finalizeComplete/
         // finalizeStopped already use, for the same reason.
         if (session.discovery.status !== 'discovering') return;
+        // Mutates the FRESHLY-READ session in place — session.rows,
+        // discovery.pagesVisited, discovery.lastPaginationAttempt, and
+        // scraperConfig (the user's column/selector configuration) are
+        // never rebuilt or touched here, only discovery.status/
+        // stopReason/discoveredUnique/updatedAt — every already-
+        // collected row and all progress/config survive exactly as they
+        // were already persisted.
         session.discovery.status = 'error';
-        session.discovery.stopReason = 'internal-error: ' + msg;
+        session.discovery.stopReason = stopReason;
         session.discovery.discoveredUnique = session.rows.length;
         session.discovery.updatedAt = Date.now();
         return setSession(host, session);
-      }).catch(function () { /* best-effort — never throw out of an already-failing path */ });
+      }).catch(function (recoveryErr) {
+        // Best-effort — the recovery write itself also failed (storage
+        // still exhausted at this exact moment). Nothing more can
+        // honestly be written to storage right now, but the loop has
+        // already genuinely stopped (this function's own callers never
+        // re-enter it), and the failure remains visible via the
+        // console.error/pushPageDiag calls above regardless — never
+        // silently discard the fact that recovery itself failed.
+        console.error(LOG_PREFIX, 'runDiscoveryLoopSafe: could not persist the error state either — storage write failed again:', recoveryErr && recoveryErr.message);
+      });
     });
   }
 
@@ -739,6 +1011,11 @@
       // discovery, e.g. after a real navigation, goes through this file's
       // own bootstrap below instead, which never touched this flag).
       discoveryStopRequested = false;
+      // [WS-PAGE-DIAG] TEMPORARY — every genuinely NEW main scrape gets
+      // its own clean pagination-diagnostic trace, so a previous run's
+      // tail can never mix into this run's head in the "Copy Pagination
+      // Diagnostic" report.
+      clearPaginationDiagBuffer();
       runDiscoveryLoopSafe(hostname(), true);
       sendResponse({ ok: true });
       return true;
@@ -763,7 +1040,26 @@
         session.discovery.stopReason = 'user';
         session.discovery.discoveredUnique = session.rows.length;
         session.discovery.updatedAt = Date.now();
-        setSession(hostname(), session).then(function () { sendResponse({ ok: true }); });
+        // CORE RECOVERY MISSION — setSession() now rejects on a real
+        // storage write failure instead of silently resolving (see its
+        // own header comment); this was the one setSession() call site
+        // in this file NOT already routed through runDiscoveryLoopSafe's
+        // own catch-all. Without a .catch() here, a failed write would
+        // leave sendResponse() never called — hanging the message
+        // channel this handler's own `return true` keeps open, the exact
+        // same silent-hang bug class content/content.js's RUN_EXTRACTION
+        // handler already fixed. discoveryStopRequested (set
+        // synchronously above, before this async chain even started) is
+        // the authoritative in-memory stop signal this script instance
+        // already honors regardless of whether this specific storage
+        // write lands, so the response is still honestly {ok:true} — the
+        // stop itself took effect either way; only the PERSISTED record
+        // of it may be stale until a later successful write.
+        setSession(hostname(), session).then(function () { sendResponse({ ok: true }); }).catch(function (e) {
+          console.error(LOG_PREFIX, 'STOP_DISCOVERY: could not persist the stopped state (storage write failed):', e && e.message);
+          pushPageDiag('STOP_DISCOVERY-storage-write-failed', { reason: (e && e.message) || String(e) });
+          sendResponse({ ok: true });
+        });
       });
       return true;
     }
@@ -781,10 +1077,19 @@
   // stricter single-status check, for the exact same real-Chrome reason
   // documented there: a navigation can destroy the outgoing instance
   // before its own post-navigation bookkeeping write lands).
+  console.log('[WS-PAGE-DIAG] BOOTSTRAP: fresh content-script instance loaded at url=', location.href, '— checking for a resumable session for host=', hostname());
+  pushPageDiag('BOOTSTRAP-start', {});
   getSession(hostname()).then(function (session) {
+    console.log('[WS-PAGE-DIAG] BOOTSTRAP: session found=', !!session, 'discoveryStatus=', session && session.discovery && session.discovery.status, 'sessionStatus=', session && session.status, 'stillRunning=', stillRunning(session));
+    pushPageDiag('BOOTSTRAP-session-check', { page: session && session.discovery && session.discovery.pagesVisited, discoveryStatus: session && session.discovery && session.discovery.status, reason: 'stillRunning=' + stillRunning(session) });
     if (stillRunning(session)) {
       console.log(LOG_PREFIX, 'bootstrap: resuming active discovery session', session.sessionId);
+      console.log('[WS-PAGE-DIAG] STAGE 18: BOOTSTRAP resuming — runDiscoveryLoopSafe() about to be called on this fresh instance. If STAGE 1 does NOT immediately follow this line in the real console, the loop itself hung before its very first getSession() — check for a synchronous throw in ensureInternalEngines()/candidateCount() etc.');
+      pushPageDiag('STAGE 18 bootstrap-resuming', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status });
       runDiscoveryLoopSafe(hostname());
+    } else {
+      console.log('[WS-PAGE-DIAG] STAGE 18: BOOTSTRAP did NOT resume — stillRunning(session) was false. THIS IS A DIRECT EXPLANATION for "stuck, no further pages": either no session exists for this exact host key, or session.status/discovery.status is already terminal.');
+      pushPageDiag('STAGE 18 bootstrap-not-resuming', { page: session && session.discovery && session.discovery.pagesVisited, discoveryStatus: session && session.discovery && session.discovery.status, reason: 'did-not-resume' });
     }
   }).catch(function () { /* nothing to resume */ });
 
@@ -792,6 +1097,24 @@
     MAX_LOOP_ITERATIONS: MAX_LOOP_ITERATIONS,
     // Exposed for targeted testing only — production code never calls
     // this directly, only through the message listener above.
-    runDiscoveryLoop: runDiscoveryLoop
+    runDiscoveryLoop: runDiscoveryLoop,
+    // CORE RECOVERY MISSION — exposed for targeted, isolated testing of
+    // the quota-safety fix (setSession() now rejects on a genuine
+    // chrome.storage.local write failure instead of silently resolving;
+    // see its own header comment) without needing to drive the full
+    // loop. Production code never calls these directly except through
+    // the loop/message-listener machinery above.
+    getSession: getSession,
+    setSession: setSession,
+    // [WS-PAGE-DIAG] persistent diagnostic ring buffer — exposed for
+    // targeted testing only; production code always goes through the
+    // pushPageDiag()/clearPaginationDiagBuffer() call sites sprinkled
+    // through the loop above, never calls these directly.
+    PAGINATION_DIAG_KEY: PAGINATION_DIAG_KEY,
+    PAGINATION_DIAG_MAX_ENTRIES: PAGINATION_DIAG_MAX_ENTRIES,
+    PAGE_DIAG_ENTRY_MAX_BYTES: PAGE_DIAG_ENTRY_MAX_BYTES,
+    pushPageDiag: pushPageDiag,
+    clearPaginationDiagBuffer: clearPaginationDiagBuffer,
+    flushPageDiagQueue: function () { return pageDiagQueue; }
   };
 })(window);

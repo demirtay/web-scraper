@@ -11,13 +11,43 @@ Web Scraper (ClickScrape) — a Manifest V3 Chrome extension for manual,
 click-to-select web data extraction. Vanilla JavaScript, no build step,
 no framework, no bundler. Content scripts are injected dynamically
 (`chrome.scripting`), never declared statically in `manifest.json`. Tests
-are plain Node scripts (no test framework) living outside this repo in
-the session's scratchpad directory, each asserting via a small local
-`assert()` helper and printing `N assertions, N failures`.
+are plain Node scripts (no test framework): pure-logic unit tests are a
+permanent, committed part of the repo under `tests/unit/` (each asserting
+via a small local `assert()` helper and printing `N assertions, N
+failures` — see `tests/lib/assert.js`/`tests/lib/load-modules.js`, and
+"Testing policy" below); a one-off exploratory script for a single
+session still belongs in the session's own scratchpad directory instead.
 `scripts/release-check.js` is the pre-release validation gate (manifest
 sanity, no eval/remote code, dev-diagnostics gating, i18n coverage,
 production ZIP build). Branches: `main` (public releases),
 `stable/v1.31.0` (frozen snapshot), `develop` (active work).
+
+## Testing policy — FAST / SITE / RELEASE
+
+Three permanent test levels exist (full detail in `TESTING.md`):
+`npm run test:fast` (syntax + `tests/unit/*` pure-logic tests +
+infra-safety scan + release-check — no browser, seconds), `npm run
+test:sites[:suite]` (real Chrome, real extension, real popup action →
+real production message flow → content script → actual result, against
+real Etsy/Amazon/eBay/proven-reliable substitute sites — never faked by
+calling internal scraper functions directly), and `npm run test:release`
+(full FAST + full SITE + the live Browser Process Safety regression —
+the only level whose result may ever be reported as "release verified").
+
+**Pick the level the change actually needs, and say so honestly — never
+report "fully verified" when the required level wasn't run:**
+- UI/CSS-only change → FAST is sufficient.
+- Scraping/parser/selector/content-script logic → FAST + SITE.
+- Pagination/navigation/discovery logic → FAST + SITE.
+- Detail Enrichment / picker → FAST + SITE (`primary-workflow` suite).
+- Export/cleaning logic → FAST + the targeted export-related SITE suite.
+- Before any release → RELEASE, mandatory, no exceptions.
+
+A SITE scenario blocked by a real CAPTCHA/login/consent/rate-limit page
+reports `BLOCKED_BY_SITE`; one that timed out under real resource
+pressure reports `BLOCKED_RESOURCE`. Neither is a pass, but neither is
+automatically a product regression either — report it exactly as what it
+is, never bypassed, never silently treated as green.
 
 ## Session start protocol
 

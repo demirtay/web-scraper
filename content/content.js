@@ -22,6 +22,18 @@
  * content/pagination.js, which registers its own separate
  * chrome.runtime.onMessage listener — this file and its picking behavior
  * are otherwise unchanged from V1.2.
+ *
+ * BUG FIX — VISUAL ELEMENT PICKER (real Etsy bug: clicking a link during
+ * picker mode navigated the page instead of being captured): picker mode
+ * now works via a full-viewport transparent "glass pane" overlay
+ * (overlayEl) that owns every pointer event for the duration of picking,
+ * rather than a document-level capture-phase listener racing the page's
+ * own (already-registered, possibly earlier) listeners — see
+ * resolveOverlayTarget()'s own header comment for the complete root-cause
+ * explanation and why only this approach can structurally guarantee the
+ * underlying page never sees the event at all. Applies identically to
+ * every pick purpose this file supports ('column', 'next-button',
+ * 'detail-field', 'live-detail-field') — one shared mechanism, fixed once.
  */
 (function () {
   'use strict';
@@ -40,10 +52,23 @@
   var raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : function (cb) { return setTimeout(cb, 16); };
 
   var pickModeActive = false;
-  var pickPurpose = 'column'; // 'column' | 'next-button' | 'detail-field'
-  var pickTargetHostname = null; // V1.18: which LIST page's Deep Scraping config a 'detail-field' pick stages into — see enterPickMode
+  var pickPurpose = 'column'; // 'column' | 'next-button' | 'detail-field' | 'live-detail-field'
+  var pickTargetHostname = null; // V1.18: which LIST page's Deep Scraping config a 'detail-field'/'live-detail-field' pick stages into — see enterPickMode
+
+  /** DETAIL ENRICHMENT (VERİ/SONUÇ/DETAY flow): 'live-detail-field' is a
+   * second, independent detail-field pick purpose — behaviorally
+   * identical to the existing V1.18 'detail-field' purpose (same picker
+   * UI, same panel, same {name/selector/attribute/multiple} shape) but
+   * staged under its OWN session-storage key prefix, so a pick made from
+   * the new DETAY tab can never collide with (or get silently consumed
+   * by) the older, still-fully-working Advanced "Deep Scraping" panel's
+   * own staging area, and vice versa — both can coexist on the same
+   * hostname without interfering with each other. Nothing about the
+   * existing 'detail-field' purpose's own behavior changes here. */
+  function isDetailPickPurpose(purpose) { return purpose === 'detail-field' || purpose === 'live-detail-field'; }
+  function detailStagingKeyPrefix(purpose) { return purpose === 'live-detail-field' ? 'ws_live_detail_field_picks::' : 'ws_detail_field_picks::'; }
   var hoveredEl = null;
-  var shadowHost, shadowRoot, highlightEl, bannerEl, panelEl, hoverLabelEl;
+  var shadowHost, shadowRoot, highlightEl, bannerEl, bannerTextEl, panelEl, hoverLabelEl, overlayEl;
   var testerDebounceTimer = null; // V1.17: the current panel's live-selector-tester debounce handle, if any
 
   function hostname() {
@@ -51,26 +76,63 @@
   }
 
   /**
-   * Resolves the *real* innermost element an event originated on, crossing
-   * open shadow-root boundaries that would otherwise cause `event.target`
-   * to be "retargeted" up to a shadow host (e.g. Reddit's <shreddit-post>)
-   * by a listener attached outside the shadow tree — which is exactly what
-   * previously made the picker highlight/select the whole post card
-   * instead of the specific field the mouse was over.
+   * BUG FIX — DETAIL VISUAL ELEMENT PICKER (real bug, confirmed via
+   * manual testing on a real Etsy listing page): the picker used to
+   * listen for mousemove/click on `document` itself (capture phase) and
+   * rely on preventDefault()/stopPropagation()/stopImmediatePropagation()
+   * inside that listener to stop the page's own click behavior (link
+   * navigation, button activation, the site's own click handlers). That
+   * only works if OUR listener is guaranteed to run, and to run, BEFORE
+   * anything on the page can act on the event — which capture-phase
+   * registration order does NOT guarantee against a real, already-loaded
+   * page: a site's own capture-phase listener registered on `window` (a
+   * shallower node than `document` in the propagation path — window is
+   * visited before document during capture) or on `document` itself
+   * EARLIER than ours (our listener is only ever added long after page
+   * load, when the user actually clicks "Pick a Field" — every one of
+   * the page's own listeners was already registered before that) can run
+   * first and call its own stopPropagation(), which prevents our
+   * later-registered `document` listener from ever firing at all — our
+   * own preventDefault() call never even executes. This is exactly what
+   * a real, non-trivial site like Etsy was observed doing: clicking a
+   * link/nested element during picker mode navigated normally, and
+   * ClickScrape never saw the click.
    *
-   * event.composedPath()[0] is not subject to that retargeting: it's the
-   * deepest node the event actually hit, including nodes inside any OPEN
-   * shadow root. Closed shadow roots are never pierced — composedPath()
-   * simply stops at their host, same as this function.
+   * THE FIX: never let the real page element receive the event AT ALL.
+   * overlayEl (see ensureUI()) is a full-viewport, transparent,
+   * `position:fixed` div with the highest z-index this file ever uses,
+   * shown only while picker mode is active — the BROWSER's own
+   * hit-testing resolves IT as the target of every pointer event over
+   * the viewport, structurally, before any JavaScript ever runs, so no
+   * page listener — regardless of where or when it was registered — can
+   * ever see the event. This is the same "glass pane" technique
+   * browser DevTools' own element inspector uses, and it is the only
+   * approach that can genuinely guarantee "website click handlers must
+   * NOT run" rather than merely "hopefully run after ours does".
+   *
+   * Since the event's own target/composedPath is now always just this
+   * file's own overlay (never anything on the real page), the previous
+   * `event.composedPath()`-based resolution has nothing useful left to
+   * resolve — the REAL element under the cursor is found geometrically
+   * instead, via `document.elementsFromPoint()`, which (like
+   * composedPath() before it) operates on the fully flattened/composed
+   * tree and so still correctly reaches into any open shadow root
+   * (including nested ones) exactly as the original Reddit
+   * <shreddit-post> fix required — this preserves that fix's own
+   * guarantee, just via geometry instead of event-path inspection.
+   * `elementsFromPoint` returns every element at that point, topmost
+   * first — index 0 is always this file's own overlay (it's always the
+   * topmost thing while shown), so the first entry that ISN'T the
+   * overlay (or its own host, defensively) is the real, intended target.
    */
-  function resolveEventTarget(e) {
-    if (typeof e.composedPath === 'function') {
-      var path = e.composedPath();
-      for (var i = 0; i < path.length; i++) {
-        if (path[i] && path[i].nodeType === 1) return path[i];
-      }
+  function resolveOverlayTarget(e) {
+    if (typeof document.elementsFromPoint !== 'function') return null;
+    var stack = document.elementsFromPoint(e.clientX, e.clientY);
+    for (var i = 0; i < stack.length; i++) {
+      var el = stack[i];
+      if (el && el.nodeType === 1 && el !== overlayEl && el !== shadowHost) return el;
     }
-    return e.target;
+    return null;
   }
 
   function ensureUI() {
@@ -83,12 +145,34 @@
 
     var style = document.createElement('style');
     style.textContent =
+      // BUG FIX — DETAIL VISUAL ELEMENT PICKER: a full-viewport, invisible
+      // "glass pane" that owns EVERY pointer event while picker mode is
+      // active — see resolveOverlayTarget()/startCapturing()'s own header
+      // comments for the full root-cause story. z-index deliberately
+      // higher than every other element THIS file ever creates (and than
+      // any realistic real-world page z-index) so it is always the
+      // topmost hit-tested element regardless of what the underlying
+      // page does with its own stacking contexts. display:none by
+      // default — a hidden element receives no pointer events at all and
+      // has zero footprint, which is also this file's own cleanup
+      // mechanism (see stopCapturing()).
+      '.ws-picker-overlay{position:fixed;top:0;left:0;width:100%;height:100%;' +
+      'z-index:2147483005;background:transparent;cursor:crosshair;display:none;}' +
       '.ws-highlight{position:fixed;pointer-events:none;border:2px solid #4F46E5;' +
       'background:rgba(79,70,229,0.15);border-radius:4px;z-index:2147483000;display:none;' +
       'box-sizing:border-box;}' +
+      // BUG REOPEN — unmistakable page-level indicator (mission's own
+      // explicit ask): a bolder banner with a bright accent border/dot,
+      // so "picker mode is active" is obvious at a glance directly on
+      // the real page — never only inferable from logs or from the
+      // (much subtler) previous plain-dark banner.
       '.ws-banner{position:fixed;top:12px;left:50%;transform:translateX(-50%);' +
-      'background:#111827;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
-      'padding:8px 16px;border-radius:8px;z-index:2147483001;display:none;box-shadow:0 4px 12px rgba(0,0,0,0.25);}' +
+      'background:#111827;color:#fff;font:700 14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
+      'padding:10px 18px;border-radius:8px;z-index:2147483001;display:none;box-shadow:0 4px 16px rgba(0,0,0,0.35);' +
+      'border:2px solid #22c55e;letter-spacing:.01em;}' +
+      '.ws-banner .ws-banner-dot{display:inline-block;width:9px;height:9px;border-radius:50%;' +
+      'background:#22c55e;margin-right:8px;vertical-align:middle;animation:ws-banner-pulse 1.1s ease-in-out infinite;}' +
+      '@keyframes ws-banner-pulse{0%,100%{opacity:1;}50%{opacity:.25;}}' +
       '.ws-panel{position:fixed;bottom:20px;right:20px;width:300px;background:#fff;color:#111827;' +
       'font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;border-radius:10px;' +
       'box-shadow:0 8px 30px rgba(0,0,0,0.25);padding:14px;z-index:2147483002;display:none;}' +
@@ -129,6 +213,26 @@
       '.ws-panel .ws-attr-name-row{margin-top:4px;}';
     shadowRoot.appendChild(style);
 
+    // BUG FIX — DETAIL VISUAL ELEMENT PICKER: created once, shown/hidden
+    // per pick session by startCapturing()/stopCapturing() — see this
+    // file's own onMouseMove/onClick (bound directly to THIS element, not
+    // document) and resolveOverlayTarget() for the full mechanism.
+    overlayEl = document.createElement('div');
+    overlayEl.className = 'ws-picker-overlay';
+    shadowRoot.appendChild(overlayEl);
+    overlayEl.addEventListener('mousemove', onMouseMove);
+    overlayEl.addEventListener('click', onClick);
+    // A real, observed root cause this fix specifically targets: some
+    // sites/frameworks trigger their own navigation/activation logic on
+    // mousedown rather than waiting for click (or a mousedown handler
+    // elsewhere on the page reacts before our own click handler would
+    // ever run) — since the overlay is now the ONLY element that ever
+    // receives ANY pointer event for the duration of picker mode, a bare
+    // preventDefault() here is enough to neutralize that path too; there
+    // is no real page listener to "race" any more; page listeners never
+    // pointer-event target that page element and receive the event at all.
+    overlayEl.addEventListener('mousedown', function (e) { if (pickModeActive) e.preventDefault(); });
+
     highlightEl = document.createElement('div');
     highlightEl.className = 'ws-highlight';
     shadowRoot.appendChild(highlightEl);
@@ -139,7 +243,12 @@
 
     bannerEl = document.createElement('div');
     bannerEl.className = 'ws-banner';
-    bannerEl.textContent = 'Web Scraper: click an element to select it — Esc to cancel';
+    var bannerDot = document.createElement('span');
+    bannerDot.className = 'ws-banner-dot';
+    bannerEl.appendChild(bannerDot);
+    bannerTextEl = document.createElement('span');
+    bannerTextEl.textContent = 'ClickScrape — PICKER ACTIVE: click an element to select it — Esc to cancel';
+    bannerEl.appendChild(bannerTextEl);
     shadowRoot.appendChild(bannerEl);
 
     panelEl = document.createElement('div');
@@ -209,8 +318,8 @@
       var ev = pendingMoveEvent;
       pendingMoveEvent = null;
       if (!ev || !pickModeActive) return;
-      var el = resolveEventTarget(ev);
-      if (!el || el === hoveredEl || el === shadowHost) return;
+      var el = resolveOverlayTarget(ev);
+      if (!el || el === hoveredEl) return;
       hoveredEl = el;
       positionHighlight(el);
       updateHoverLabel(el);
@@ -248,19 +357,27 @@
 
   function onClick(e) {
     if (!pickModeActive) return;
+    // Structurally the real page never receives this event at all (see
+    // resolveOverlayTarget()'s own header comment) — these three calls
+    // are kept anyway, per this bug fix's own explicit requirement, as
+    // defense-in-depth against the (only theoretically possible) case of
+    // e.target briefly resolving to something other than our own overlay.
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
 
-    var resolved = resolveEventTarget(e);
-    var composedPath = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    var resolved = resolveOverlayTarget(e);
     console.log(LOG_PREFIX, 'pick click', {
-      'event.target': e.target,
-      'composedPath (innermost first)': composedPath,
-      'resolved target': resolved,
+      'overlay event.target': e.target,
+      'resolved (real) target': resolved,
       tagName: resolved && resolved.tagName,
       textContent: resolved ? (resolved.textContent || '').trim().slice(0, 120) : ''
     });
+    // Defensive only — elementsFromPoint always finds at least
+    // <html>/<body> for any on-screen point, so this should never
+    // actually trigger in practice; if it somehow does, staying in pick
+    // mode (rather than calling handlePicked(null)) is the safe choice.
+    if (!resolved) return;
 
     stopCapturing();
     handlePicked(resolved);
@@ -273,18 +390,25 @@
   }
 
   function startCapturing() {
-    document.addEventListener('mousemove', onMouseMove, true);
-    document.addEventListener('click', onClick, true);
+    if (overlayEl) overlayEl.style.display = 'block';
     document.addEventListener('keydown', onKeyDown, true);
   }
 
   // Stops hover/click interception (used once an element has been picked)
   // but leaves Escape active so the naming panel can still be dismissed.
+  // BUG FIX — DETAIL VISUAL ELEMENT PICKER: hiding overlayEl IS the
+  // cleanup here — a display:none element is not hit-tested at all, so
+  // it receives no further pointer events and the underlying page's own
+  // click/link/button behavior is fully restored the instant this runs
+  // (mission requirement: "All picker listeners/highlights/temporary
+  // state must be removed after successful selection/cancellation/
+  // termination/error" — this function is that ONE cleanup path,
+  // called from every one of those cases: onClick right before
+  // handlePicked, and exitPickMode for Escape/Done/cancel).
   function stopCapturing() {
     pickModeActive = false;
     hoveredEl = null;
-    document.removeEventListener('mousemove', onMouseMove, true);
-    document.removeEventListener('click', onClick, true);
+    if (overlayEl) overlayEl.style.display = 'none';
     hideHighlight();
     hideHoverLabel();
     pendingMoveEvent = null;
@@ -294,13 +418,17 @@
   function enterPickMode(purpose, extra) {
     ensureUI();
     pickPurpose = purpose || 'column';
-    if (pickPurpose === 'detail-field') pickTargetHostname = (extra && extra.targetHostname) || pickTargetHostname;
+    if (isDetailPickPurpose(pickPurpose)) pickTargetHostname = (extra && extra.targetHostname) || pickTargetHostname;
     pickModeActive = true;
-    bannerEl.textContent = pickPurpose === 'next-button'
-      ? 'Web Scraper: click the "Next" / pagination control — Esc to cancel'
-      : pickPurpose === 'detail-field'
-        ? 'Web Scraper: click a field to add it — pick as many as you need, Esc when done'
-        : 'Web Scraper: click an element to select it — Esc to cancel';
+    // BUG REOPEN — mission's own explicit ask: an "unmistakable" page-
+    // level indicator that picker mode is active, visible on the real
+    // page itself (not only in logs) — every variant now leads with the
+    // same unambiguous "ClickScrape — PICKER ACTIVE" prefix.
+    bannerTextEl.textContent = pickPurpose === 'next-button'
+      ? 'ClickScrape — PICKER ACTIVE: click the "Next" / pagination control — Esc to cancel'
+      : isDetailPickPurpose(pickPurpose)
+        ? 'ClickScrape — PICKER ACTIVE: click a field to add it — pick as many as you need, Esc when done'
+        : 'ClickScrape — PICKER ACTIVE: click an element to select it — Esc to cancel';
     bannerEl.style.display = 'block';
     panelEl.style.display = 'none';
     startCapturing();
@@ -330,9 +458,38 @@
     // popup picks staged fields up when reopened there (see popup.js's
     // checkForPendingDetailFieldPicks, mirroring the existing V1.3
     // next-button-pick recovery pattern exactly).
-    if (pickPurpose === 'detail-field') {
-      var detailInfo = WSScraper.pickElementInfo(el, null);
-      var stagingKey = 'ws_detail_field_picks::' + (pickTargetHostname || hostname());
+    //
+    // BUG FIX — real production report + real Chrome storage audit: this
+    // used to call WSScraper.pickElementInfo(el, null), which — with no
+    // existing container passed — runs Sel.findRepeatingContainer(el),
+    // a heuristic built for LIST pages (repeating cards/rows). A single
+    // Detail page has no such concept at all, but the heuristic doesn't
+    // know that and can still detect SOME broad matching pattern
+    // elsewhere on a real, complex page (related items, review cards,
+    // etc.) — and when the clicked element itself gets classified as
+    // that "container", the resulting relativeSelector becomes ':scope',
+    // which content/scraper.js's runDetailExtraction previously (mis)
+    // read as "the entire page body", persisting up to ~140KB of raw
+    // page HTML/text per record (confirmed: ~8.92MB of a real ~9MB
+    // ws_deepscrape_run). Fixed at the source: a Detail pick now always
+    // resolves an ABSOLUTE selector for the EXACT clicked element via
+    // Sel.buildSelectorForElement — the same primitive resolveNextButtonInfo
+    // above already uses for the same reason (no repeating-container
+    // concept applies there either) — which can structurally never
+    // produce ':scope'.
+    if (isDetailPickPurpose(pickPurpose)) {
+      var detailAttribute = WSSelector.suggestAttribute(el);
+      var detailSelector = WSSelector.buildSelectorForElement(el);
+      var detailInfo = {
+        ok: !!detailSelector,
+        reason: detailSelector ? undefined : 'unresolvable',
+        containerSelector: null,
+        relativeSelector: detailSelector,
+        matchCount: detailSelector ? WSSelector.countMatches(detailSelector) : 0,
+        attribute: detailAttribute,
+        previewText: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80)
+      };
+      var stagingKey = detailStagingKeyPrefix(pickPurpose) + (pickTargetHostname || hostname());
       chrome.storage.session.get([stagingKey], function (result) {
         var staged = (result && result[stagingKey]) || [];
         renderPanel(el, { columns: staged }, detailInfo);
@@ -763,7 +920,7 @@
     // list-page column's relativeSelector is always evaluated per-row/
     // per-container and "multiple" has no meaning there.
     var multipleCheckbox = null;
-    if (pickPurpose === 'detail-field') {
+    if (isDetailPickPurpose(pickPurpose)) {
       var multipleRow = document.createElement('div');
       multipleRow.className = 'ws-checkbox-row';
       multipleRow.style.marginTop = '6px';
@@ -777,7 +934,7 @@
       panelEl.appendChild(multipleRow);
     }
 
-    var isDetailField = pickPurpose === 'detail-field';
+    var isDetailField = isDetailPickPurpose(pickPurpose);
     var actions = document.createElement('div');
     actions.className = 'ws-actions';
     var cancelBtn = document.createElement('button');
@@ -820,7 +977,13 @@
 
       if (isDetailField) {
         column.multiple = (multipleCheckbox && multipleCheckbox.checked) ? 'all' : 'first';
-        var stagingKey = 'ws_detail_field_picks::' + (pickTargetHostname || hostname());
+        // BUG REOPEN Phase 5: "store/return at minimum... source URL" —
+        // the real sample page this field was actually picked on, purely
+        // informational (never re-read to drive any control-flow
+        // decision), useful for a user or a future diagnostic to see
+        // exactly which page produced a given selector.
+        column.pickedFromUrl = location.href;
+        var stagingKey = detailStagingKeyPrefix(pickPurpose) + (pickTargetHostname || hostname());
         chrome.storage.session.get([stagingKey], function (result) {
           var staged = ((result && result[stagingKey]) || []).concat([column]);
           var data = {};
@@ -829,8 +992,10 @@
             // Stay in pick mode for the next field (spec's own numbered
             // workflow: pick Description, then Brand, then SKU, all in
             // one Element Picker activation) — Done/Esc is the only way
-            // to actually exit.
-            enterPickMode('detail-field', { targetHostname: pickTargetHostname });
+            // to actually exit. Re-enters with the SAME purpose that was
+            // active (never hardcoded) so a 'live-detail-field' pick
+            // session stays on its own staging key across multiple adds.
+            enterPickMode(pickPurpose, { targetHostname: pickTargetHostname });
           });
         });
         return;
@@ -943,15 +1108,40 @@
     }
 
     if (message.type === 'RUN_EXTRACTION') {
+      // BUG FIX — "BAŞLA does not actually start a new scrape" (real
+      // production report: UI hangs at "Veri işleniyor…" forever after
+      // an existing session's results are already showing): this whole
+      // promise chain had NO .catch() anywhere. If WSStorage.getState()
+      // rejected, or migrateContainerSelectorIfStale()/WSScraper.
+      // runExtraction() threw (e.g. a malformed/stale selector against
+      // the CURRENT page's real DOM shape), sendResponse() was simply
+      // never called — the message channel this `return true` keeps
+      // open then never closes, so popup.js's own
+      // `await chrome.tabs.sendMessage(...)` in sendToContent() hangs
+      // indefinitely. This is the exact same class of silent-async-
+      // death bug already found and fixed elsewhere in this project
+      // (content/discovery.js's own runDiscoveryLoopSafe() wrapper) —
+      // never previously hardened here. The added .catch() guarantees
+      // sendResponse() is ALWAYS eventually called, converting a silent
+      // infinite hang into an honest, immediate {ok:false, error} popup.
+      // js's existing readError handling already reacts to correctly —
+      // no popup.js change needed for that. This also naturally unsticks
+      // handleStartLiveSession()'s own `runTriggerInFlight` guard (only
+      // ever reset in that function's own `finally`, which cannot run
+      // while its `await sendToContent(...)` is hung) — a fresh BAŞLA
+      // click was previously silently swallowed by that guard forever
+      // once one run got stuck this way.
       WSStorage.getState(hostname()).then(function (state) {
         var migration = migrateContainerSelectorIfStale(state); // mutates state.containerSelector in place when it migrates
         var persisted = migration.templateMigrationPerformed
           ? WSStorage.setState(hostname(), state) // step 5: save the migrated template back automatically
           : Promise.resolve();
-        persisted.then(function () {
+        return persisted.then(function () {
           var result = WSScraper.runExtraction(state);
           sendResponse({ ok: true, rows: result.rows, totalCount: result.totalCount, containerMigration: migration });
         });
+      }).catch(function (e) {
+        sendResponse({ ok: false, error: String((e && e.message) || e) });
       });
       return true; // keep the message channel open for the async response
     }
@@ -962,8 +1152,14 @@
     // and by the popup's "Test Detail Fields" sample preview.
     if (message.type === 'RUN_DETAIL_EXTRACTION') {
       try {
-        var row = WSScraper.runDetailExtraction(message.fields || []);
-        sendResponse({ ok: true, row: row });
+        // BUG FIX: runDetailExtraction now returns {row, rejectedFields}
+        // (oversized/whole-page values are refused, never silently
+        // persisted — see that function's own header comment) — passed
+        // through unchanged so background.js's fetchOneDetailPage can
+        // mark the record honestly instead of ever treating a rejected
+        // field as a successful, complete extraction.
+        var result = WSScraper.runDetailExtraction(message.fields || []);
+        sendResponse({ ok: true, row: result.row, rejectedFields: result.rejectedFields });
       } catch (e) {
         sendResponse({ ok: false, error: String((e && e.message) || e) });
       }

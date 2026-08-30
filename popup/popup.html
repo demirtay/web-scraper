@@ -16,6 +16,13 @@
   <nav id="tab-nav" class="ws-tab-nav" role="tablist" aria-label="Web Scraper sections">
     <button type="button" class="ws-tab-btn" data-tab="scrape" role="tab" aria-selected="true" data-i18n="tabs.scrape">Scrape</button>
     <button type="button" class="ws-tab-btn" data-tab="results" role="tab" aria-selected="false" data-i18n="tabs.results">Results</button>
+    <!-- DETAIL ENRICHMENT mission: the third peer step in the VERİ | SONUÇ
+         | DETAY flow — disabled (not hidden) until a real result dataset
+         exists, so its presence itself communicates "this comes after
+         Results", never reachable before there's anything to enrich.
+         Toggled via JS (updateDetailTabAvailability), not a static
+         `disabled` attribute, since it must react live as rawRows changes. -->
+    <button type="button" class="ws-tab-btn" data-tab="detay" id="detay-tab-btn" role="tab" aria-selected="false" data-i18n="tabs.detail" disabled>Detail</button>
     <!-- V1 UX WORKFLOW SIMPLIFICATION: Monitoring/Research are post-result
          actions, not equal-weight top-level steps — demoted out of the
          primary nav bar (ws-tab-btn-secondary => display:none in
@@ -554,6 +561,63 @@
             <button type="button" id="session-diag-copy-btn" class="ws-chip-btn">📋 Copy Session Diagnostic</button>
             <p id="session-diag-status" class="ws-note" style="margin-top:4px;"></p>
             <textarea id="session-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+          </div>
+
+          <!-- [WS-PAGE-DIAG] TEMPORARY PAGINATION DIAGNOSTIC (DEV ONLY) —
+               real production report: main discovery stuck on page 11,
+               the page's own DevTools console is destroyed on every real
+               pagination navigation. Reads content/discovery.js's own
+               persistent ring buffer (chrome.storage.local key
+               ws_pagination_diag, capped at 100 compact entries) directly
+               — survives navigation, no DevTools timing required. Same
+               reachability contract as #session-diag-panel above:
+               `hidden` by default in the shipped HTML, only ever unhidden
+               by popup.js after a real WSLicense.isDevelopmentInstall()
+               check resolves true, which can never be true for a
+               packaged/Chrome-Web-Store install. Never translated
+               (data-i18n) — not user-facing production copy. See
+               scripts/release-check.js for the static check confirming
+               this stays gated. -->
+          <div id="pagination-diag-panel" hidden style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
+            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+            <button type="button" id="pagination-diag-copy-btn" class="ws-chip-btn">📋 Copy Pagination Diagnostic</button>
+            <p id="pagination-diag-status" class="ws-note" style="margin-top:4px;"></p>
+            <textarea id="pagination-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+          </div>
+
+          <!-- SELF-DIAGNOSTICS / HEALTH CHECK (DEV ONLY) — observes and
+               summarizes the FULL lifecycle of a main scrape (start flow,
+               discovery/pagination, UI<->engine consistency, storage,
+               Detail Enrichment) as one HEALTHY/WARNING/STALLED/FAILED
+               verdict with an exact reason — diagnoses only, never
+               mutates/resets/restarts anything. Same reachability
+               contract as every other dev-only panel above: `hidden` by
+               default in the shipped HTML, only ever unhidden by
+               popup.js after a real WSLicense.isDevelopmentInstall()
+               check resolves true, which can never be true for a
+               packaged/Chrome-Web-Store install. Never translated
+               (data-i18n) — not user-facing production copy. See
+               scripts/release-check.js for the static check confirming
+               this stays gated. -->
+          <div id="health-check-panel" hidden style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
+            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+            <div class="ws-section-title" style="font-size:12px;">🩺 Sağlık Kontrolü</div>
+            <div class="ws-toolbar-row">
+              <button type="button" id="health-check-run-btn" class="ws-chip-btn">🩺 Sağlık Kontrolü</button>
+              <button type="button" id="health-check-copy-report-btn" class="ws-chip-btn">📋 Raporu Kopyala</button>
+              <button type="button" id="health-check-copy-history-btn" class="ws-chip-btn">📋 Tanılama Geçmişini Kopyala</button>
+              <button type="button" id="health-check-clear-btn" class="ws-chip-btn">🧹 Tanılamayı Temizle</button>
+            </div>
+            <p class="ws-note" style="margin-top:6px;"><strong>Overall:</strong> <span id="health-check-overall">—</span></p>
+            <p class="ws-note"><strong>Main scrape:</strong> <span id="health-check-main">—</span></p>
+            <p class="ws-note"><strong>Pagination:</strong> <span id="health-check-pagination">—</span></p>
+            <p class="ws-note"><strong>UI sync:</strong> <span id="health-check-ui-sync">—</span></p>
+            <p class="ws-note"><strong>Storage:</strong> <span id="health-check-storage">—</span></p>
+            <p class="ws-note"><strong>Detail:</strong> <span id="health-check-detail">—</span></p>
+            <p class="ws-note"><strong>Last progress:</strong> <span id="health-check-last-progress">—</span> · <strong>Page:</strong> <span id="health-check-current-page">—</span> · <strong>Results:</strong> <span id="health-check-result-count">—</span></p>
+            <p class="ws-note"><strong>Last issue:</strong> <span id="health-check-last-issue">—</span></p>
+            <p id="health-check-status" class="ws-note" style="margin-top:4px;"></p>
+            <textarea id="health-check-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:140px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
           </div>
 
           <!-- Everything below (Next Actions, Export, Assets, Change
@@ -1251,6 +1315,157 @@
         </section>
       </div>
 
+      <!-- ================= DETAY (DETAIL ENRICHMENT) TAB =================
+           Mission's own explicit flow: VERİ -> SONUÇ -> DETAY. Reuses the
+           EXACT SAME background.js Deep Scrape engine (START_DEEP_SCRAPE/
+           STOP_DEEP_SCRAPE/TEST_DEEP_SCRAPE_SAMPLE/RESUME_DEEP_SCRAPE/
+           RETRY_FAILED_DEEP_SCRAPE_ITEMS/GET_DEEP_SCRAPE_STATE) and the
+           same content-script picking/extraction primitives the existing
+           V1.18 "Deep Scraping" panel already uses (that panel — inside
+           the Results tab's Advanced/export-gate area — is completely
+           untouched by this addition and keeps working exactly as
+           before). This is a NEW, separate, minimum-necessary UI surface
+           operating on `rawRows` (the same shared results array both
+           flows already populate), adding what the old panel doesn't
+           have: scope selection (ALL/FIRST 100/FIRST 500/FIRST N/
+           SELECTED RECORDS), a resumable checkpointed job, and per-
+           hostname template save/load. -->
+      <div class="ws-tab-panel" id="tab-panel-detay" data-tab-panel="detay" hidden>
+        <section id="detay-empty" class="ws-section">
+          <p class="ws-note" data-i18n="detail.disabledHint">Finish scraping first — Detail Enrichment becomes available once you have a results dataset.</p>
+        </section>
+
+        <section id="detay-body" class="ws-section" hidden>
+          <div class="ws-section-title" data-i18n="detail.groupTitle">Detail Enrichment (optional)</div>
+          <p class="ws-note" data-i18n="detail.intro">Visit each record's own page to collect extra fields (seller, description, materials…) and merge them into your results. You choose exactly which fields and how many records — nothing is guessed automatically.</p>
+
+          <!-- Step 1: setup (hidden once a run starts/exists) -->
+          <div id="dt-setup-section">
+            <label data-i18n="detail.sourceColumnLabel">Follow links from</label>
+            <select id="dt-source-column"></select>
+            <p id="dt-no-link-column" class="ws-note" hidden data-i18n="detail.noLinkColumn">No Link-type column found in your results — Detail Enrichment needs one column whose value is each record's own page URL.</p>
+
+            <div class="ws-section-title" style="font-size:12px;margin-top:10px;" data-i18n="detail.fieldsTitle">Detail Fields</div>
+            <ul id="dt-fields-list" class="ws-columns"></ul>
+            <p id="dt-fields-empty" class="ws-empty" data-i18n="detail.fieldsEmpty">No detail fields yet — pick one visually on an example record page, or add one manually.</p>
+            <div class="ws-toolbar-row">
+              <button id="dt-pick-fields-btn" class="ws-chip-btn" data-i18n="detail.pickFields">🎯 Pick a Field on an Example Page</button>
+              <button id="dt-add-field-btn" class="ws-chip-btn" data-i18n="detail.addField">+ Add Detail Field Manually</button>
+            </div>
+
+            <!-- BUG REOPEN — Phase 1/2 diagnostics: dev-only (same
+                 isDevelopmentInstall()-gated reachability contract as
+                 #session-diag-panel elsewhere in this file), proves
+                 each real step of the picker-activation sequence
+                 (background.js#startDetailFieldPick) regardless of
+                 whether the popup that triggered it is still open. -->
+            <div id="detail-pick-diag-panel" hidden style="margin-top:6px;border-top:1px solid #e5e7eb;padding-top:6px;">
+              <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+              <button type="button" id="detail-pick-diag-copy-btn" class="ws-chip-btn">📋 Copy Detail Picker Diagnostic</button>
+              <p id="detail-pick-diag-status" class="ws-note" style="margin-top:4px;"></p>
+              <textarea id="detail-pick-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:110px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+            </div>
+
+            <div id="dt-add-field-form" class="ws-panel-inline" hidden>
+              <label data-i18n="detail.fieldNameLabel">Field Name</label>
+              <input type="text" id="dt-field-name" spellcheck="false" />
+              <label data-i18n="detail.fieldSelectorLabel">Selector</label>
+              <input type="text" id="dt-field-selector" spellcheck="false" placeholder=".description" />
+              <label data-i18n="detail.fieldTypeLabel">Extraction Type</label>
+              <select id="dt-field-attribute">
+                <option value="text">Text</option>
+                <option value="html">HTML</option>
+                <option value="href">Link URL</option>
+                <option value="src">Image source</option>
+                <option value="alt">Alt text</option>
+                <option value="attr">Attribute…</option>
+              </select>
+              <div id="dt-field-attrname-row" hidden>
+                <label data-i18n="detail.fieldAttrNameLabel">Attribute name</label>
+                <input type="text" id="dt-field-attrname" spellcheck="false" placeholder="data-sku" />
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;color:#111827;margin-top:8px;">
+                <input type="checkbox" id="dt-field-multiple" />
+                <span data-i18n="detail.fieldMultipleLabel">This may match multiple values — extract all</span>
+              </label>
+              <div class="ws-panel-actions">
+                <button id="dt-field-save-btn" class="ws-btn ws-btn-primary" data-i18n="detail.fieldSaveBtn">Save Field</button>
+                <button id="dt-field-cancel-btn" class="ws-btn ws-btn-secondary" data-i18n="detail.fieldCancelBtn">Cancel</button>
+              </div>
+            </div>
+
+            <div class="ws-panel-actions">
+              <button id="dt-test-btn" class="ws-btn ws-btn-secondary" data-i18n="detail.test">Test Fields (sample)</button>
+            </div>
+            <div id="dt-test-results" class="ws-note" hidden style="white-space:pre-line;margin-top:8px;"></div>
+
+            <!-- Templates: save/load, never applied automatically. -->
+            <details class="ws-advanced">
+              <summary data-i18n="detail.templatesSummary">Detail Template</summary>
+              <div class="ws-toolbar-row">
+                <button id="dt-save-template-btn" class="ws-chip-btn" data-i18n="detail.saveTemplate">💾 Save as Template</button>
+              </div>
+              <label data-i18n="detail.loadTemplateLabel">Load a saved template for this site</label>
+              <select id="dt-template-select"></select>
+              <p id="dt-templates-empty" class="ws-note" hidden data-i18n="detail.noTemplates">No saved templates for this site yet.</p>
+              <div class="ws-panel-actions">
+                <button id="dt-load-template-btn" class="ws-btn ws-btn-secondary" data-i18n="detail.loadTemplate">Load Template</button>
+                <button id="dt-delete-template-btn" class="ws-btn ws-btn-secondary" data-i18n="detail.deleteTemplate">Delete</button>
+              </div>
+            </details>
+
+            <!-- Step 2: scope — mission: "The user decides", never an
+                 implicit ALL-records default. -->
+            <div class="ws-section-title" style="font-size:12px;margin-top:10px;" data-i18n="detail.scopeTitle">How many records to enrich?</div>
+            <div class="ws-toolbar-row" role="radiogroup" aria-label="Detail Enrichment scope">
+              <button type="button" class="ws-chip-btn ws-chip-active" id="dt-scope-all-btn" data-scope="all">ALL</button>
+              <button type="button" class="ws-chip-btn" id="dt-scope-first100-btn" data-scope="first100" data-i18n="detail.scopeFirst100">FIRST 100</button>
+              <button type="button" class="ws-chip-btn" id="dt-scope-first500-btn" data-scope="first500" data-i18n="detail.scopeFirst500">FIRST 500</button>
+              <button type="button" class="ws-chip-btn" id="dt-scope-firstn-btn" data-scope="firstn" data-i18n="detail.scopeFirstNBtn">FIRST…</button>
+              <button type="button" class="ws-chip-btn" id="dt-scope-selected-btn" data-scope="selected" data-i18n="detail.scopeSelectedBtn">SELECTED RECORDS</button>
+            </div>
+            <div id="dt-scope-firstn-row" hidden style="margin-top:6px;">
+              <input type="number" id="dt-scope-firstn-input" min="1" step="1" data-i18n-placeholder="detail.scopeFirstNPlaceholder" placeholder="e.g. 500" />
+            </div>
+            <div id="dt-scope-selected-row" hidden style="margin-top:6px;">
+              <div class="ws-toolbar-row">
+                <button type="button" id="dt-select-all-btn" class="ws-chip-btn" data-i18n="detail.selectAll">Select All</button>
+                <button type="button" id="dt-clear-selection-btn" class="ws-chip-btn" data-i18n="detail.clearSelection">Clear</button>
+                <span id="dt-selection-count" class="ws-note"></span>
+              </div>
+              <div id="dt-records-table-wrap" class="ws-table-wrap" style="max-height:180px;">
+                <table id="dt-records-table"><tbody></tbody></table>
+              </div>
+            </div>
+
+            <p id="dt-workload-summary" class="ws-note" style="margin-top:8px;"></p>
+            <p id="dt-scope-error" class="ws-note" hidden style="color:#b91c1c;"></p>
+
+            <div class="ws-panel-actions">
+              <button id="dt-start-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="detail.start">Start Detail Enrichment</button>
+            </div>
+          </div>
+
+          <!-- Step 3: progress -->
+          <section id="dt-progress-section" class="ws-section" hidden>
+            <div class="ws-section-title">
+              <span data-i18n="detail.progressTitle">Detail Enrichment</span> <span id="dt-progress-badge" class="ws-status-badge">RUNNING</span>
+            </div>
+            <p id="dt-progress-text" class="ws-note" style="margin-bottom:4px;"></p>
+            <p id="dt-progress-current" class="ws-note" style="font-size:11px;color:#6b7280;"></p>
+            <p id="dt-retry-status" class="ws-note" hidden style="font-size:11px;color:#b45309;"></p>
+            <div class="ws-actions-row">
+              <button id="dt-stop-btn" class="ws-btn ws-btn-danger" data-i18n="deepScrape.stop">Stop</button>
+              <button id="dt-resume-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="detail.resume">Resume</button>
+              <button id="dt-retry-failed-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="deepScrape.retryFailed">Retry Failed</button>
+              <button id="dt-new-run-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="detail.newRun">Configure Another Run</button>
+              <button id="dt-reset-btn" class="ws-btn ws-btn-danger" hidden data-i18n="detail.reset">Reset</button>
+            </div>
+            <p id="dt-summary-text" class="ws-note" hidden style="white-space:pre-line;margin-top:8px;"></p>
+          </section>
+        </section>
+      </div>
+
       <!-- ================= MONITOR TAB ================= -->
       <div class="ws-tab-panel" id="tab-panel-monitor" data-tab-panel="monitor" hidden>
         <section class="ws-section">
@@ -1487,6 +1702,8 @@
   <script src="../utils/recipes.js"></script>
   <script src="../utils/templates.js"></script>
   <script src="../utils/downloads.js"></script>
+  <script src="../utils/detailscope.js"></script>
+  <script src="../utils/detailtemplates.js"></script>
   <script src="../utils/transforms.js"></script>
   <!-- NEW FEATURE — DATA CLEANING ENGINE: optional per-column type
        (RAW/TEXT/PRICE/NUMBER/URL), applied AFTER extraction and BEFORE
@@ -1504,6 +1721,8 @@
   <script src="../utils/i18n-data.js"></script>
   <script src="../utils/i18n.js"></script>
   <script src="../utils/destinations.js"></script>
+  <script src="../utils/healthdiag.js"></script>
+  <script src="../utils/healthcheck.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

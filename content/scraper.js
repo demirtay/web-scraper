@@ -430,8 +430,47 @@
    * Still built entirely out of the SAME WSSelector primitives
    * (queryFromScope/extractValue) — no separate selector engine.
    */
+  // BUG FIX — real production report + real Chrome storage audit: a
+  // Detail field whose saved relativeSelector was ':scope' previously
+  // resolved to `document.body` for extraction purposes — meaning
+  // attribute:'html'/'text' returned the ENTIRE PAGE's innerHTML/
+  // textContent (confirmed: ~120-143KB per Etsy product, flagged
+  // "html, full-page-text" by the real audit, accounting for ~8.92MB of
+  // a real ~9MB ws_deepscrape_run). ':scope' has NO legitimate meaning
+  // here: unlike a repeating list row (where ':scope' correctly means
+  // "the container element itself"), a Detail page extraction has no
+  // container concept at all — runDetailExtraction always operates on
+  // the whole page as a single record. A ':scope'-saved field can only
+  // ever be a mis-detected container from the picker's own repeating-
+  // container heuristic (which has no business running on a single
+  // detail page to begin with — see content.js's handlePicked, the
+  // other half of this fix) — so it is refused outright now, never
+  // silently reinterpreted as "the whole page".
+  //
+  // DEFENSIVE FIX (belt-and-suspenders, independent of the cause above):
+  // EVERY extracted Detail field value is now bounded by
+  // DETAIL_FIELD_MAX_BYTES regardless of selector/attribute — a
+  // malformed selector or unexpected page DOM structure (a NEW site,
+  // not just this exact ':scope' case) must never again be able to
+  // silently persist 100+KB of page HTML/text into a single field. An
+  // oversized value is REJECTED (never truncated — truncating would
+  // silently corrupt what looks like normal data; rejecting is honest
+  // and visible) and recorded in the returned rejectedFields list so the
+  // caller (background.js's fetchOneDetailPage) can mark the record
+  // accordingly rather than ever counting the mere act of navigating to
+  // the page as a successful, complete extraction.
+  var DETAIL_FIELD_MAX_BYTES = 20000; // generous for any genuine single-field value (a long paragraph description is normally well under 2-3KB); mirrors background.js's own DEEP_SCRAPE_FIELD_MAX_BYTES — kept in sync manually, this project's established "local copy of a shared constant" convention (see e.g. utils/runstate.js's own IDENTITY_TRACKING_PARAMS comment)
+
+  function isOversizedDetailValue(v) {
+    if (typeof v === 'string') return v.length > DETAIL_FIELD_MAX_BYTES;
+    if (Array.isArray(v)) { try { return JSON.stringify(v).length > DETAIL_FIELD_MAX_BYTES; } catch (e) { return false; } }
+    return false;
+  }
+
+  /** @returns {{row: object, rejectedFields: Array<{id:string, reason:string}>}} */
   function runDetailExtraction(fields) {
     var row = {};
+    var rejectedFields = [];
     // V1.21: computed once for the whole detail page, not per field —
     // this is the naturally distinct-per-page case structured columns
     // fit best (spec #8 Deep Scraping compatibility): each detail page
@@ -452,25 +491,38 @@
         row[col.id] = '1';
         return;
       }
+      if (col.relativeSelector === ':scope') {
+        rejectedFields.push({ id: col.id, reason: 'whole-page-selector' });
+        return;
+      }
       if (col.multiple === 'all') {
         var matches;
         try {
-          matches = col.relativeSelector === ':scope' ? [document.body] : document.body.querySelectorAll(col.relativeSelector);
+          matches = document.body.querySelectorAll(col.relativeSelector);
         } catch (e) {
           matches = [];
         }
         var values = [];
+        var anyOversized = false;
         Array.prototype.forEach.call(matches, function (el) {
           var v = Sel.extractValue(el, col.attribute, document.body, col.attributeName);
-          if (v) values.push(v);
+          if (!v) return;
+          if (isOversizedDetailValue(v)) { anyOversized = true; return; }
+          values.push(v);
         });
+        if (anyOversized) rejectedFields.push({ id: col.id, reason: 'oversized-value' });
         row[col.id] = values;
       } else {
-        var el = col.relativeSelector === ':scope' ? document.body : Sel.queryFromScope(document.body, col.relativeSelector);
-        row[col.id] = Sel.extractValue(el, col.attribute, document.body, col.attributeName);
+        var el = Sel.queryFromScope(document.body, col.relativeSelector);
+        var value = Sel.extractValue(el, col.attribute, document.body, col.attributeName);
+        if (isOversizedDetailValue(value)) {
+          rejectedFields.push({ id: col.id, reason: 'oversized-value' });
+        } else {
+          row[col.id] = value;
+        }
       }
     });
-    return row;
+    return { row: row, rejectedFields: rejectedFields };
   }
 
   root.WSScraper = {
