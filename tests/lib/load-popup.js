@@ -194,9 +194,41 @@ async function loadPopup(opts) {
     alarms: { create: function () {}, clear: function () {}, onAlarm: { addListener: function () {} } }
   };
 
+  // A local, non-leaking wrapper — never mutates Node's own real global
+  // URL class (this file's sandbox object is rebuilt fresh per
+  // loadPopup() call, but the real `URL` reference is shared process-
+  // wide across every test file scripts/test-fast.js runs in-process;
+  // adding static methods directly onto it would silently contaminate
+  // every OTHER test). `new SandboxURL(str)` still returns a genuine
+  // `new URL(str)` (JS's own `new` semantics: a constructor function
+  // that explicitly returns an object uses THAT object instead of the
+  // implicit `this`), so every existing `new URL(...)` call site in
+  // popup.js keeps working unmodified — this only ADDS the two static
+  // Blob-URL methods triggerDownload() needs, real browsers have but
+  // Node's URL class does not.
+  function SandboxURL(input, base) { return new URL(input, base); }
+  SandboxURL.createObjectURL = function () { return 'blob:mock-url'; };
+  SandboxURL.revokeObjectURL = function () {};
+
   const sandbox = {
-    console: console, URL: URL, URLSearchParams: URLSearchParams, Object: Object, Array: Array,
-    Math: Math, Date: Date, JSON: JSON, Promise: Promise, Blob: function () {}, FileReader: function () {},
+    console: console, URL: SandboxURL, URLSearchParams: URLSearchParams, Object: Object, Array: Array,
+    Math: Math, Date: Date, JSON: JSON, Promise: Promise,
+    // __blobsCreated captures every `new Blob([...], opts)` call verbatim
+    // (joined content + mime type) so a test can inspect exactly what a
+    // real "Export ..." button would have downloaded, without needing
+    // real browser Blob-URL machinery.
+    __blobsCreated: [],
+    Blob: function (parts, blobOpts) {
+      var content = (parts || []).map(function (p) {
+        if (typeof p === 'string') return p;
+        if (p instanceof Uint8Array || Buffer.isBuffer(p)) return Buffer.from(p).toString('utf8');
+        return String(p);
+      }).join('');
+      var entry = { content: content, type: blobOpts && blobOpts.type };
+      sandbox.__blobsCreated.push(entry);
+      return entry;
+    },
+    FileReader: function () {},
     setTimeout: setTimeout, clearTimeout: clearTimeout, setInterval: setInterval, clearInterval: clearInterval,
     chrome: chrome, document: doc, location: { hostname: 'test-extension-id', href: 'chrome-extension://test-extension-id/popup/popup.html' },
     // __clipboardWrites captures every navigator.clipboard.writeText()

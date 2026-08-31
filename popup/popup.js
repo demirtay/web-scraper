@@ -3344,6 +3344,49 @@
     return true;
   }
 
+  /** BUG FIX — real production report: a fully COMPLETED Detail
+   * Enrichment run's own field data (ws_deepscrape_fields/
+   * ws_deepscrape_run) could sit correctly in storage forever without
+   * ever appearing in the Results table or any export. Root cause: the
+   * only existing call to mergeDetailResults() ran too early in init()'s
+   * own sequence to succeed on a popup reopen — it happens inside
+   * renderDetailProgress()'s terminal branch, itself called from the
+   * existingDeepScrapeRun restore block earlier in init() (well before
+   * this point), at a moment when BOTH of its real dependencies were
+   * still unmet: (1) detailConfig (selected fields/source column) is
+   * only ever hydrated lazily by renderDetailSetup(), which requires the
+   * user to have actually visited the Detay tab THIS popup session —
+   * mergeDetailResults()'s own `if (!detailConfig...) return;` guard
+   * silently no-oped without it; (2) rawRows itself is still the
+   * module-level empty default at that point — restoreLiveSessionIfAny()
+   * (immediately above this call) is what actually populates it, and
+   * that runs ~400 lines later in init(). So on every popup reopen where
+   * the Detay tab hadn't been revisited yet, the automatic merge
+   * silently did nothing, even though every prerequisite was already
+   * genuinely fully present in storage.
+   *
+   * This is called ONCE, immediately after restoreLiveSessionIfAny() has
+   * resolved (so rawRows reflects the real dataset, or stays empty and
+   * this becomes a safe no-op) — a pure HYDRATION step: it only ever
+   * reads data a run has ALREADY finished writing to storage
+   * (ws_deepscrape_run/ws_deepscrape_fields/ws_detail_active_config). It
+   * never sends any message to background.js, never opens a tab, never
+   * re-visits a single product page — an active (non-terminal) run's own
+   * live chrome.storage.onChanged listener (attachDetailStorageListener,
+   * already wired) continues to handle merging exactly as it did before,
+   * unchanged, as that run actually progresses/completes. */
+  async function hydrateDetailResultsIfAny() {
+    if (!rawRows.length) return;
+    var dsState;
+    try { dsState = await localGet('ws_deepscrape_run'); } catch (e) { return; }
+    if (!dsState || !dsState.runId || dsState.runId.indexOf('dse_') !== 0) return;
+    if (['completed', 'stopped', 'error'].indexOf(dsState.status) === -1) return;
+    try {
+      await ensureDetailConfigHydrated();
+      await mergeDetailResults(dsState);
+    } catch (e) { /* best-effort — a hydration failure must never block popup init */ }
+  }
+
   // =====================================================================
   // V1.21 — Structured Data inspector (JSON-LD + common page metadata).
   // Unlike Auto Detect (which REPLACES the whole working configuration
@@ -10264,6 +10307,12 @@
     // itself switches to 'results' once it finds something to restore).
     var restoredSession = false;
     try { restoredSession = await restoreLiveSessionIfAny(); } catch (e) { /* best-effort — fall through to normal tab restore */ }
+    // BUG FIX — see hydrateDetailResultsIfAny()'s own header comment:
+    // must run AFTER restoreLiveSessionIfAny() (rawRows is only
+    // populated by that call) regardless of whether it found anything
+    // (the function's own internal guards make it a safe no-op when
+    // there is no main-scrape dataset and/or no completed Detail run).
+    try { await hydrateDetailResultsIfAny(); } catch (e) { /* best-effort — never blocks popup init */ }
     if (!restoredSession) {
       var savedTab = null;
       try { savedTab = await sessionGet(ACTIVE_TAB_SESSION_KEY); } catch (e) { /* fall back to 'scrape' below */ }

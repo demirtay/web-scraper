@@ -1,5 +1,79 @@
 # Current Mission
 
+## DETAIL ENRICHMENT RESULTS HYDRATION ON POPUP REOPEN — real production bug
+
+**Status: REAL-CHROME VERIFIED — 2026-08-31.**
+
+**Real Chrome acceptance checkpoint (this is the checkpoint tagged
+`verified-full-scrape-detail-export-2026-08-31`):**
+- Etsy main scrape completed successfully: **22 pages scanned, 1,263
+  unique base records**.
+- Detail Enrichment completed: **1,263 / 1,263** processed — **1,175
+  successful, 88 missing, 0 errors**.
+- Completed Detail data hydrates correctly after a popup close/reopen
+  (this mission's own fix) — no re-visit of any of the 1,263 product
+  pages required.
+- Detail columns are visible in the Results table and in the exported
+  Excel file — manually inspected, containing **1,263 rows with both the
+  original base columns and the Detail columns**.
+- Main pagination confirmed working through all 22 pages.
+- `npm run test:fast`: 23 unit test files, 668 assertions, 0 failures, 0
+  crashed. `release-check`: 20/20 PASS.
+
+**Status before the above real-Chrome pass: IMPLEMENTED, awaiting real
+Chrome verification.**
+
+**Root cause:** the only existing call to `mergeDetailResults()` (inside
+`renderDetailProgress()`'s terminal branch) ran too early in `init()`'s
+own sequence to ever succeed on a popup reopen after a Detail run had
+already completed. At that point in `init()`: (1) `detailConfig`
+(selected fields/source column) was still unhydrated — only ever
+populated lazily by `renderDetailSetup()`, which requires the user to
+have visited the Detay tab THIS popup session — so `mergeDetailResults`'s
+own `if (!detailConfig...) return;` guard silently no-oped; (2) `rawRows`
+was still the empty module-level default — `restoreLiveSessionIfAny()`
+(the function that actually populates it) doesn't run until ~400 lines
+later in the same `init()`. Both gaps had to be true simultaneously for
+the bug to reproduce, and on a normal "close popup mid/after-run, reopen
+later" flow they always were. Detail's own storage
+(`ws_deepscrape_run`/`ws_deepscrape_fields`) was never the problem — the
+data was always sitting there correctly; it just never got read at a
+point where it could actually be merged.
+
+**Fix (popup/popup.js only):** new `hydrateDetailResultsIfAny()`, called
+once, immediately after `restoreLiveSessionIfAny()` resolves in `init()`
+(so `rawRows` is final). Pure hydration — reads whatever a
+completed/stopped/error-terminal Detail run already has via the exact
+same, unmodified `mergeDetailResults()`/`ensureDetailConfigHydrated()`
+functions; never sends a message to background.js or the content
+script, never opens a tab, never re-fetches a page. An active
+(non-terminal) run's existing live `chrome.storage.onChanged` merge path
+is completely unchanged.
+
+**Test infra:** `tests/lib/load-popup.js` — added a non-leaking
+`SandboxURL` wrapper (`URL.createObjectURL`/`revokeObjectURL`, never
+mutates Node's real global `URL`) and a content-capturing `Blob` stub —
+needed so a test could drive the REAL "Export Data → CSV" button and
+inspect what it actually produced, not just infer from code reading.
+
+**New test:** `tests/unit/detail-results-hydration-on-reopen.test.js`
+(10 assertions) — reproduces the exact scenario: main scrape + completed
+Detail run + persisted field data + persisted field config all already
+in storage, popup loaded fresh (no BAŞLA/RUN_EXTRACTION at all). Proves:
+rows preserved, Detail columns/values hydrated from already-stored data,
+the "missing" (partial) record stays genuinely blank (never fabricated),
+zero messages sent to background.js/content script during hydration, and
+the real CSV export button's actual output contains the Detail columns
+and values.
+
+**Tests:** 23 unit test files, 668 assertions, 0 failures, 0 crashed.
+`release-check`: 20/20. Full FAST: PASS. Zero diff vs the last commit
+for `content/`/`background/` — main scrape/pagination/discovery/Detail
+run logic completely untouched. Not committed/pushed yet — awaiting
+real Chrome verification.
+
+---
+
 ## CORE RECOVERY — item #1: content/discovery.js setSession() quota-safety fix
 
 **Status: IMPLEMENTED, awaiting real Chrome verification.** Recovery-plan
