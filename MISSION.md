@@ -1,5 +1,1268 @@
 # Current Mission
 
+## REAL DETAIL ENRICHMENT VERIFICATION — ROUND 13: FALSE-POSITIVE CHALLENGE DETECTION BLOCKED EXTRACTION ENTIRELY
+
+**Status: IMPLEMENTED, tests green, awaiting real-Chrome re-verification.**
+Not committed/pushed — v1.1.0-verified tag untouched. Real evidence
+after Round 12's merge-loss fix: a 303-row/7-page main scrape stayed
+healthy, and the user watched the Detail worker visibly navigate to many
+real Amazon product pages before manually pressing STOP. At diagnostic
+time: `completed=0`, `partial=0` — not just "blank after merge" (Round
+12's bug) but **zero records ever reached a successful extraction at
+all** — `ws_deepscrape_fields` had 0/302 non-empty entries for every one
+of the 7 configured fields, even though the field selectors themselves
+were independently proven correct (the picker's own live preview showed
+real values: weight=0.83 kg, dimensions=14.37"D x 4.5"W x 15.35"H,
+materyal=Acrylonitrile Butadiene Styrene, base=Wedge, type=ABS).
+
+**Trace (per the mission's own explicit pipeline) — FIRST BROKEN
+TRANSITION found:** worker navigates to product URL (confirmed
+working — this is what the user watched happen) -> `extractDetailFields()`
+(`background/background.js`) calls `pageLooksLikeChallenge(tabId)`
+**before** ever running the extractor, specifically so a real
+CAPTCHA/anti-bot page is never confused with a genuine selector miss.
+This is where extraction dies: `pageLooksLikeChallenge()` queried
+`DEEP_SCRAPE_CHALLENGE_SELECTORS`, which included `[id*="px-" i]` and
+`[class*="px-" i]` — a bare substring match for ANY element whose
+id/class contains "px-" **anywhere**, not merely PerimeterX's own actual
+challenge markup (already correctly, narrowly covered by the separate
+`#px-captcha` entry in the same list). "px-" is an extremely common
+short prefix in real-world CSS (Tailwind-style spacing utilities like
+`px-4`/`sm:px-8`, ad/analytics "pixel" tracking-div ids, hashed
+CSS-in-JS class names) — a real, complex, React-driven Amazon product
+page is near-certain to contain at least one completely unrelated
+element matching this substring. Every real navigation was therefore
+misclassified `SITE_CHALLENGE` (`retryable:false`) **before** the actual
+`RUN_DETAIL_EXTRACTION` message was ever sent to the content script —
+explaining every symptom at once: real navigation happens (it's checked
+BEFORE the false-positive fires), fast non-retrying failures cycle
+through many distinct URLs (SITE_CHALLENGE never retries — explains
+"watched many pages" while still ending at 0 completed), and zero values
+ever reach `ws_deepscrape_fields` for any record (the extractor
+genuinely never runs). The "Test Detail Fields" picker preview never hit
+this: it reads live values directly from the tab the user is already
+looking at, with no navigation/worker-tab/challenge-check machinery
+involved at all — which is exactly why the selectors could be proven
+correct while the real run still produced zero values.
+
+**Answer to the mission's own A/B/C/D:** **D — another proven
+mechanism.** Not (A) extraction producing blank values, not (B) URL
+matching failing, not (C) a later state write erasing a successful
+merge (that was Round 12's already-fixed bug) — extraction was never
+attempted at all, rejected one step earlier by a false-positive
+anti-bot-challenge detector.
+
+**Fix (`background/background.js` only, 1 array):**
+`DEEP_SCRAPE_CHALLENGE_SELECTORS` — removed the two overbroad `"px-"`
+substring entries. The specific, correct PerimeterX marker
+(`#px-captcha`) and every other provider's own real marker
+(recaptcha/hcaptcha/cloudflare iframes, generic `captcha` id/class) are
+untouched and still fully detected — verified directly (Part 2 of the
+new test): a real `#px-captcha` page and a real reCAPTCHA iframe both
+still correctly return "challenge detected" after the fix. Pure removal
+of noise, zero loss of real detection capability.
+
+**Related, NOT fixed (explicitly out of this mission's scope):**
+`e2e/lib/challenge-detect.js` carries the identical `[id*="px-" i]`/
+`[class*="px-" i]` entries (its own header comment credits it as the
+"same category of signal" the background.js list was modeled on) — the
+E2E test harness likely has the same latent false-positive risk against
+real sites. Left untouched per this mission's explicit scope (production
+Detail Enrichment pipeline only); flagged here for a future mission.
+
+**Test infrastructure addition (`tests/lib/mini-dom.js`):** added
+minimal `#id` selector support (`parseSimple`/`matchesSimple`) — needed
+so a test can drive the REAL, unmodified `DEEP_SCRAPE_CHALLENGE_SELECTORS`
+array (which contains a literal `'#px-captcha'` entry) against a fake
+DOM, rather than only testing a subset of the real selector list. Purely
+additive; re-verified against all 11 existing tests that load
+`mini-dom.js` (0 regressions).
+
+**Regression test:** new
+`tests/unit/detail-enrichment-false-positive-challenge-detection.test.js`
+(21 assertions) — Part 1: captures the REAL `wsDetectChallengeDom`
+function and the REAL (fixed) selector array straight out of
+`background.js` via an actual `chrome.scripting.executeScript({func,
+args})` call (never a reimplementation), proving the OLD selector
+config (reproduced verbatim from git history, passed as `args` to the
+same real function) false-positives on a realistic ordinary product
+page, while the CURRENT config does not, on the exact same page. Part 2:
+proves real challenge pages (`#px-captcha`, a reCAPTCHA iframe) are
+still correctly detected after the fix. Part 3: end-to-end, 4 records
+(per the mission's own explicit "3-5 records, never 302" scale) through
+the REAL, unmodified `resolveDetailPage()`/`fetchOneDetailPage()`/
+`runDeepScrapeUrls()` pipeline with a fake worker tab "navigating" to a
+page carrying the same incidental `"px-"` markup — proves all 4 records
+now reach `status:'completed'` with zero `SITE_CHALLENGE` failures, and
+every one of the 5 sample Detail fields (weight/dimensions/materyal/
+base/type, matching the real report's own field names/values) has real
+stored values for all 4 records in `ws_deepscrape_fields`. **Verified as
+a genuine regression test**: re-run with the fix temporarily reverted —
+goes RED (15 failures, `0/4` completed, every record `SITE_CHALLENGE`,
+`0/4` stored per field — reproducing the exact reported "0/302" shape)
+— then restored to green.
+
+**Files changed:** `background/background.js` (1 array, +27/-3 lines
+including explanatory comment). `tests/lib/mini-dom.js` (additive `#id`
+selector support). `popup/popup.js`, `content/content.js`,
+`content/discovery.js`, `content/autodetect.js`, `content/nextdetect.js`:
+zero diff this round — mission's own explicit "do not modify Discovery,
+pagination, normal scraping, canonical columns, export, or STOP
+behavior" scope, and Round 12's merge-loss fix untouched (still correct,
+still needed once extraction itself produces real values again).
+
+**Tests:** 41 unit test files, 1905 assertions, 0 failures, 0 crashed;
+release-check 19/19; full FAST: PASS. No browser E2E run — this session
+never runs the automated browser harness; the user's own real Chrome
+retest (with BOTH the Round 12 and Round 13 fixes in place) is the next
+step.
+
+---
+
+## REAL DETAIL ENRICHMENT VERIFICATION — ROUND 12: MERGED DETAIL VALUES SILENTLY WIPED AFTER COMPLETION
+
+**Status: IMPLEMENTED, tests green, awaiting real-Chrome re-verification.**
+Not committed/pushed — v1.1.0-verified tag untouched. Real evidence,
+collected AFTER Round 11's column-schema fix (main scrape: 302 rows, 7
+Amazon pages, base columns healthy). A Detail Enrichment run over all 302
+product URLs (7 fields: weight/dimensions/materyal/base/type/about/yorum
+sayısı) visited every page and completed normally. The real exported
+Excel had all 7 Detail columns present as HEADERS, but every single one
+of the 302 rows was blank underneath them (0 populated rows per column) —
+headers present, values gone.
+
+**Investigation (per the mission's own checklist):**
+1. Did each completed Detail record contain extracted values in storage?
+   YES — `background.js`'s `persistDetailResultFields(url, resolved.fields)`
+   correctly wrote real field values into `ws_deepscrape_fields`, keyed
+   by the exact same `url` string used throughout that record's own
+   lifecycle (dispatch -> fetch -> persist never re-keys on `finalUrl`
+   or anything else).
+2. Are Detail records keyed by the same URL as the main rows? YES — both
+   `WSDetailScope.buildDetailUrlList()` (dispatch) and
+   `mergeDetailResults()` (merge) read the identical `row[sourceColumnId]`
+   raw value, with no normalization mismatch between them.
+3. Does `mergeDetailResults()` find a matching main row? YES — traced and
+   confirmed correct; `mergeDeepScrapeResults()` (the older, parallel
+   Deep Scraping panel's own merge) uses the identical, unmodified
+   pattern for comparison.
+4. Are `dt_*` columns created but written under different IDs? NO —
+   `computeTransformedResult()`'s `baseColumns = state.columns.concat(deepScrapeColumns).concat(detailColumns);`
+   already appends Detail's own columns correctly (and always did,
+   completely independent of Round 11's canonical-schema fix — see
+   suspicion #6 below).
+5. Does hydration/export read from an OLD dataset instance instead of
+   the merged canonical rows? **YES — this is the actual root cause.**
+6. Is Round 11's canonical-column-schema fix accidentally filtering
+   Detail columns? **NO, ruled out** — Round 11 only ever touched
+   `content/content.js`'s `migrateContainerSelectorIfStale()` (a
+   content-script-side container-selector repair), which has zero
+   overlap with popup.js's own, entirely separate `detailColumns` array
+   or `computeTransformedResult()`'s column-merging logic.
+
+**Root cause traced:** `mergeDetailResults()` (`popup/popup.js`) only
+ever mutates the in-memory `rawRows` array — by design, it never writes
+`dt_*` values back into `ws_live_session` storage (see its own header
+comment: the field VALUES live in `ws_deepscrape_fields`, a separate
+key). `attachLiveSessionStorageListener()`'s `chrome.storage.onChanged`
+callback unconditionally did `rawRows = activeLiveSession.rows;` every
+time `ws_live_session::<host>` changed — and it STAYS attached
+(`session.status === 'active'`) for as long as the popup is open on that
+session, long after the main scrape itself finished. `content/livewatch.js`'s
+own passive `MutationObserver`-driven rescan keeps running on the
+original scrape tab the entire time it stays open — completely
+independent of Detail Enrichment — and re-persists this exact same
+session key on essentially any DOM mutation (ads, carousels, lazy-loaded
+widgets: a near-certainty on a real e-commerce page over however long a
+302-URL Detail run takes). The very next such write, landing any time
+after Detail finished while the user is still looking at Results,
+silently replaced the already-merged in-memory `rawRows` with a fresh
+copy straight from storage that had never seen a single `dt_*` value —
+wiping every Detail column back to blank, with no error of any kind. The
+column LIST itself (`detailColumns`, feeding export headers) is a
+completely separate, unaffected variable — which is exactly why the
+export showed headers with zero values, not missing columns entirely.
+
+**Fix (`popup/popup.js` only, 1 call site):**
+`attachLiveSessionStorageListener()` now re-runs the exact same,
+already-correct, URL-keyed `hydrateDetailResultsIfAny()` (the function a
+prior mission already built for the "popup reopen" case) every time it
+replaces `rawRows` — a pure re-application of whatever a TERMINAL Detail
+run already has in storage, never a new fetch/navigation, never a re-
+charge. A Detail run that is still actively RUNNING is unaffected: its
+own live `attachDetailStorageListener()`/`renderDetailProgress()` path
+keeps merging exactly as it always did once it reaches ITS OWN terminal
+state, independent of this listener. The older "Deep Scraping" panel's
+own `mergeDeepScrapeResults()` has no equivalent hydration call and
+likely carries the identical latent bug — explicitly out of scope for
+this mission (Detail Enrichment only) and left untouched.
+
+**Test infrastructure fix (`tests/lib/load-popup.js`, needed to even
+observe this bug in a test):** `chrome.storage.onChanged.addListener()`
+was a pure no-op mock — real listeners were registered but never
+capturable/invokable, so no test could exercise
+`attachLiveSessionStorageListener()`'s real callback at all. Now captures
+every registered listener into `sandbox.__storageChangeListeners` (zero
+behavior change for any existing test — nothing previously read this,
+nothing auto-fires) and adds `sandbox.fireStorageChange(areaName,
+changesObj)` to invoke them directly with a real `(changes, areaName)`
+pair, mirroring this project's own established convention of capturing
+`chrome.runtime.onMessage` listeners for direct dispatch in content-
+script tests. Separately, `chrome.storage.local.get()`'s mock was
+returning a **shallow reference** to the stored object rather than a
+copy — unlike real `chrome.storage.local`, which always hands back a
+structured-clone. This silently masked the entire bug in testing:
+`mergeDetailResults()`'s in-place row mutation leaked directly into the
+mock's own store, so a simulated "later write" would already carry the
+Detail values that were never actually persisted in production, making
+the new regression test pass even with the real fix removed. Fixed to
+deep-clone (`JSON.parse(JSON.stringify(...))`, matching the exact
+pattern the Round 11 vm-sandbox loaders already use) — verified as a
+genuinely zero-behavior-change correctness fix by re-running all 12
+existing tests that load `load-popup.js`, all still 0 failures.
+
+**Regression test:** new
+`tests/unit/detail-enrichment-merge-survives-live-session-writes.test.js`
+(35 assertions) — Scenario A: the mission's own explicit 3-row spec
+(Title/Price base columns, weight/material/about Detail fields via URLs
+A/B/C), proving `mergeDetailResults()` maps all 3 by URL, base values
+stay unchanged, final export headers are exactly `Title, Price, Link,
+weight, material, about` with real values (not blanks) — THEN fires a
+simulated `content/livewatch.js`-style passive rescan write on
+`ws_live_session::example.com` (via the new `fireStorageChange()` test
+helper, driving the REAL, unmodified listener) and proves every Detail
+value survives it, base columns are untouched, and the CSV taken AFTER
+that write (what the user actually downloads in the real report) still
+contains every row's real values — then a genuine popup reopen
+(`loadPopup()` again against the same storage) confirms hydration still
+works and sends ZERO messages to background.js/content scripts (no
+re-fetch). Scenario B: the REAL Amazon shape (302 main rows, 7 Detail
+fields matching the report's own field names verbatim) — same survival
+proof at the reported scale: 302/302 rows populated before AND after the
+simulated live-session write, export has exactly 303 lines (1 header +
+302 rows), and every row's "materyal" value is verified present (302
+occurrences). **Verified as a genuine regression test**, not a false
+positive: re-run with the fix line temporarily commented out —
+correctly goes RED (7 failures, "got 0 / 302", export showing headers
+with blank values — reproducing the exact reported symptom) — then
+restored to green.
+
+**Files changed:** `popup/popup.js` (1 call site added inside
+`attachLiveSessionStorageListener()`), `tests/lib/load-popup.js` (test
+infra: onChanged capture/dispatch + storage.local.get deep-clone fix).
+`content/content.js`, `content/discovery.js`, `content/autodetect.js`,
+`content/nextdetect.js`: zero diff this round (mission's own explicit
+"do not investigate navigation/pagination/container selector" scope).
+Pagination, Next-detection, main scraper column ownership (Round 11),
+exports' own transform/cleaning logic, STOP/RESUME, dedupe, auto-scroll,
+load-more, storage architecture: zero diff.
+
+**Tests:** 40 unit test files, 1884 assertions, 0 failures, 0 crashed;
+release-check 19/19; full FAST: PASS. All 12 pre-existing tests that
+load `tests/lib/load-popup.js` re-verified individually (0 failures) to
+confirm the shared test-infra fix caused no regressions elsewhere. No
+browser E2E run — this session never runs the automated browser harness;
+real-Chrome verification is done manually by the user, which this round
+is now awaiting per its own closing instruction ("Then STOP for one real
+Chrome verification").
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 11: COLUMN-SCHEMA OWNERSHIP (mixed-schema corruption from Round 10's own repair)
+
+**Status: IMPLEMENTED, tests green, awaiting real-Chrome re-verification.**
+Not committed/pushed — v1.1.0-verified tag untouched. Real evidence,
+collected AFTER Round 10's pagination/container fix started working (7
+pages scanned, 302 unique records): user manually selected exactly TWO
+columns (`başlık`, `fiyat`) via Manual Mode — never touched Auto Detect.
+`session.scraperConfig.columns` correctly persisted those exact two IDs
+(`col_1788333394475_knjsfa`, `col_1788333411610_dnhp65`). BUT
+`session.rows` contained TWO different schemas: row 0 used a freshly-
+generated 10-column Auto-Detect-style schema (Link, Image, Title, Count,
+Rating, Field, Field 2, Price, Field 3, Field 4); every later row used
+the user's own two manual column IDs. Excel export picked up the
+10-column row as its header, so 301 of 302 records rendered blank (their
+real data lived under different column IDs than the export was reading).
+The page-1 diagnostic also proved it directly: raw=48, accepted=48,
+duplicates=47, newUnique=1 — a dedup signature collapse consistent with
+most of that 10-column schema's fields (the generic `Field`/`Field 2`/
+etc. fallback names) resolving empty for nearly every card.
+
+**Root cause traced:** this is a genuine regression introduced by
+Round 10's own new repair code, in the SAME round it was written. Round
+10's over-broad/low-cohesion repair branch in `migrateContainerSelectorIfStale()`
+(`content/content.js`) adopted `runAutoDetect()`'s winning structure's
+containerSelector AND fields "together, atomically" — i.e. it did
+`state.columns = autoDetectWinner.fields.map(...)` unconditionally
+whenever it adopted a new container, even when the user never ran Auto
+Detect and had manually selected different columns. That mutated
+in-memory `state` was extracted from (producing page 1's one corrupted
+row) and persisted back to `ws_state::hostname` — but popup.js's own,
+SEPARATE in-memory `state` (which `session.scraperConfig` for every
+LATER Discovery page is built from) only ever re-reads
+`containerMigration.migratedContainerSelector` after RUN_EXTRACTION,
+never columns. So exactly one row (from that single RUN_EXTRACTION call)
+got the wrong 10-column schema, while all 301 later rows — extracted via
+`discovery.js` using `session.scraperConfig`, which never saw the column
+swap — kept the correct 2-column schema. Two different generations of
+column IDs, both real, coexisting in one session's `rows`.
+
+**Fix (`content/content.js` only):** the repair branch now NEVER touches
+`state.columns` — only `state.containerSelector` is ever replaced. This
+is safe because `Sel.queryFromScope()`/`querySelector()` perform a
+DESCENDANT search, not a direct-child-only one: a class-based
+`relativeSelector` built to work from a narrow internal-fragment scope
+generally ALSO resolves correctly from a broader, more correct ANCESTOR
+scope (the true record-level container) — intermediate nesting depth
+doesn't change what a descendant selector matches. The repair is
+verified, not assumed: a new `computeStoredColumnsCohesion(newContainer,
+state.columns)` check must show the user's own EXISTING columns resolve
+with cohesion `>= MIN_STORED_SELECTOR_COHESION` against the candidate
+container (or, for a <2-column config with no measurable "cohesion", a
+plausible non-zero match count) before the migration is accepted;
+otherwise it falls through to the pre-existing single-anchor fallback,
+or leaves the original selector untouched entirely. Auto Detect's own
+field list is no longer read by this repair path at all.
+
+**Preserved, unchanged:** `popup/popup.js`'s `handleUseAutoDetectFields()`
+— the ONLY legitimate path by which Auto Detect's own columns become
+canonical, triggered exclusively by the user explicitly clicking "Use
+Selected Fields" after running Auto Detect themselves. Entirely
+independent of `migrateContainerSelectorIfStale()`; zero diff this
+round.
+
+**Files changed:** `content/content.js` only. `content/autodetect.js`,
+`content/nextdetect.js`, `content/discovery.js`, `popup/popup.js`: zero
+diff this round (discovery.js's Round 10 delegation to the same
+canonical function means it benefits from this fix automatically, with
+no changes of its own needed). Pagination, Next-detection, container
+selector logic itself, Detail Enrichment, exports' own code, STOP/RESUME,
+dedupe, auto-scroll, load-more, storage architecture — zero diff.
+
+**Regression test:** new `tests/unit/canonical-column-schema-ownership.test.js`
+(111 assertions) — drives the real, unmodified BAŞLA -> RUN_EXTRACTION
+path with a manually-selected 2-column config (Turkish names, real
+report's own literal column IDs) against a stale, over-broad
+containerSelector (triggering the exact repair path implicated), then
+drives `content/discovery.js`'s own real `runDiscoveryLoop()` through a
+second page. Proves: RUN_EXTRACTION's container IS repaired
+(`templateMigrationPerformed === true`) while every one of the 48 rows
+contains ONLY the 2 manual column IDs (+ legitimate internal metadata —
+`scraper.js`'s own `_wsAnomaly` flag, present on every row regardless of
+schema) with real, non-blank data under both; persisted
+`ws_state::hostname` still shows exactly 2 columns with the original IDs
+and names (`başlık`/`fiyat`) after the repair; a full discovery-loop
+pagination cycle (real pagination-landmark detection + navigation,
+unaffected by this fix) leaves `session.scraperConfig.columns` still
+exactly those same 2 canonical IDs; every row across the whole run
+carries only those 2 IDs, never a mixed generation. Also re-verified all
+3 most directly-relevant pre-existing tests still pass unchanged:
+`amazon-real-diagnostic-reproduction.test.js` (17/17 — its own fixture's
+2 columns happen to also resolve correctly against the repaired
+container, so the repair-acceptance path is still exercised the same
+way), `discovery-canonical-selector-ownership.test.js` (10/10),
+`stale-container-selector-migration-fix.test.js` (11/11).
+
+**Tests:** 39 unit test files, 1849 assertions, 0 failures, 0 crashed
+(every file individually verified, plus the new file's own 111
+assertions); release-check 19/19; full FAST: PASS. No browser E2E run —
+this session never runs the automated browser harness; real-Chrome
+verification is done manually by the user, which this round is now
+awaiting per its own closing instruction ("Then STOP for one real Chrome
+verification").
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 10: REPAIR TECHNIQUE UPGRADED (single-anchor climb -> runAutoDetect())
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification.** Not
+committed/pushed — v1.1.0-verified tag untouched. Real Active Session
+Diagnostic from a failed run proved Round 9's revalidation fix reached
+the session but still left `containerSelector = "div.a-section.a-spacing-none"`
+in place (raw=245, newUnique=167, garbage rows exactly as reported).
+
+**Root cause traced:** both Round 6's (`content.js`) and Round 9's
+(`discovery.js`, delegating to the same logic) re-validation used a
+single-anchor `Sel.findRepeatingContainer()` climb to repair an
+over-broad/low-cohesion selector. That climb has its own deliberate
+"stop once complete" heuristic (`countMeaningfulDescendants >= 3`) —
+correct for its ORIGINAL purpose (Manual Mode, anchored on a human's own
+confirmed click) but not strong enough for this repair: on the real
+page, an internal fragment level (e.g. a title-row) can already look
+"complete enough" on its own, so the climb stops there instead of
+reaching the true record boundary. The resulting "migrated" candidate is
+STILL a fragment, its row-cohesion isn't measurably better than the
+original, and the repair is correctly (from its own narrow logic)
+rejected — leaving the stale selector in place. This is why the
+Round 9 fix reached the session but didn't actually repair it.
+
+**Fix:**
+1. **`content/content.js`** (`migrateContainerSelectorIfStale()`): for
+   the over-broad/low-cohesion case, now PREFERS
+   `content/autodetect.js`'s own `runAutoDetect()` — a strictly more
+   powerful, already-independently-validated signal (hard row-cohesion
+   gate + field-anchored candidate generation, proven across many
+   earlier rounds) — adopting its winning structure's containerSelector
+   AND fields together, atomically (old columns' relativeSelectors are
+   meaningless against a new container scope). The single-anchor climb
+   remains as a fallback only when `WSAutoDetect` isn't available or
+   finds nothing usable — never removed, never weakened; the
+   over-specific (too-narrow) case is completely unchanged.
+2. New `window.WSContent = { migrateContainerSelectorIfStale }` export —
+   `content/content.js` previously exported nothing.
+3. **`content/discovery.js`**: its own Round 9 duplicate logic
+   (`computeStoredColumnsCohesion`/the old `revalidateScraperConfigIfStale`
+   body) removed entirely — now calls
+   `window.WSContent.migrateContainerSelectorIfStale(session.scraperConfig)`
+   directly, so both the RUN_EXTRACTION path and the discovery-loop path
+   call the exact same, single, canonical repair function — no more
+   divergence risk between two copies.
+
+**Files changed:** `content/content.js`, `content/discovery.js` only.
+`content/autodetect.js`, `content/nextdetect.js`: zero diff this round
+(confirmed identical). Detail Enrichment, STOP/RESUME, exports, dedupe,
+auto-scroll, load-more, storage architecture — zero diff.
+
+**Regression test:** new `tests/unit/amazon-real-diagnostic-reproduction.test.js`
+(17 assertions) — reproduces the EXACT real diagnostic (stale
+`div.a-section.a-spacing-none`, real garbage row texts verbatim: "Amazon's
+Choice: Overall Pick", "4.7", "Material", "Top Brands", "Customer
+Reviews") through the real, unmodified production BAŞLA ->
+RUN_EXTRACTION path. Proves: `migration.usedAutoDetectRepair === true`,
+repaired selector matches ~48 real cards (not the stale ~102+ in this
+fixture's own proportions), extraction produces exactly 48 rows with
+zero garbage-text leakage, repaired selector persists to storage, and —
+using the real, unmodified `findNextControl()` — the stale selector
+still rejects the real Next control (bug reproduced) while the repaired
+one finds it, enabled. Round 9's own test
+(`discovery-canonical-selector-ownership.test.js`) updated to load
+`content/content.js` + `content/autodetect.js` too (previously didn't,
+since the logic lived directly in discovery.js) — still 10/10 green,
+now exercising the stronger repair path end-to-end through the real
+discovery loop.
+
+**Tests:** 38 unit test files, 1738 assertions, 0 failures, 0 crashed
+(every file individually verified); release-check 19/19; full FAST:
+PASS. No browser E2E run.
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 9: CANONICAL SELECTOR OWNERSHIP (session lifetime, not just RUN_EXTRACTION)
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification.** Not
+committed/pushed — v1.1.0-verified tag untouched.
+
+**Contradiction that triggered this round:** a fresh Auto Detect pass on
+the real Amazon page correctly found the true ~48-row selector
+(`matchedElementCount=48`, `unique data-asin=48`), yet the CURRENT LIVE
+SESSION / Next-Detect diagnostic still showed the old, stale
+`div.a-section.a-spacing-none` — even though Round 6's
+`content/content.js` RUN_EXTRACTION-time migration fix was already
+shipped.
+
+**Root cause traced (no guessing):** `content/content.js`'s
+`migrateContainerSelectorIfStale()` only ever runs when `RUN_EXTRACTION`
+is actually invoked (a scrape freshly (re)started). Once a discovery
+session EXISTS, `content/discovery.js`'s `runDiscoveryLoop()` reads
+`session.scraperConfig.containerSelector` fresh every iteration and uses
+it for that session's ENTIRE lifetime with zero re-validation. Critically,
+`content/discovery.js`'s own bootstrap-resume block (file-bottom code,
+run on EVERY fresh content-script injection — a real page reload or
+extension reload included) picks up ANY still-running session and hands
+it straight back into the loop with its own frozen-in-time config,
+completely disconnected from any newer Auto Detect result. A session
+created (or left running/stuck) before this project's own
+container-precision fixes existed keeps using its stale selector
+forever, regardless of how many times Auto Detect is re-run afterward —
+nothing ever tells THAT session to look again.
+
+**Fix (content/discovery.js only):** new `revalidateScraperConfigIfStale()`
+— the SAME re-validation mechanism `content/content.js`'s
+`migrateContainerSelectorIfStale()` already uses and already proved safe
+(row-cohesion-based staleness detection, re-anchor via
+`Sel.findRepeatingContainer` + `buildContainerSelector`, only accept a
+MEASURABLY better replacement) — applied exactly ONCE, at the very start
+of `runDiscoveryLoop()`'s own run (`firstIteration` only — covers both a
+genuinely fresh `START_DISCOVERY` and a resumed instance's first pass),
+never re-applied per page (a session's selector must stay consistent
+across all its pages once validated). content/content.js/
+content/autodetect.js/content/nextdetect.js: zero diff this round.
+
+**Regression test:** new `tests/unit/discovery-canonical-selector-ownership.test.js`
+(10 assertions) — Scenario A: an ALREADY-EXISTING session (never
+touched by RUN_EXTRACTION in the test — simulating a bootstrap-resumed
+instance) carrying the exact stale `div.a-section.a-spacing-none`
+selector (with pagination wrapped in the same generic class, matching
+the real second symptom) is self-healed by the real, unmodified
+`runDiscoveryLoop()` before next-page detection — proves: canonical
+selector matches ~48, old selector never survives anywhere in final
+storage, next candidate found, pagination action issued toward `page=2`.
+Scenario B: an already-healthy selector is left completely untouched
+(preservation — never second-guesses a working selector).
+
+**Tests:** 37 unit test files, 1721 assertions, 0 failures, 0 crashed
+(every file individually verified); release-check 19/19; full FAST:
+PASS. No browser E2E run.
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 8: CONTAINER-SCOPING HYPOTHESIS DISPROVED (no fix)
+
+**Status: DIAGNOSIS ONLY — no code changed.** Real-Chrome retest after
+Round 7's clickTrigger fix still showed 167 records / 1 page / no
+navigation. Hypothesis investigated per explicit instruction: "production
+findNextControl(containerSelector) searches only INSIDE the product-row
+container, so Amazon's pagination bar (living outside/adjacent to it)
+can never be found."
+
+**Traced (content/nextdetect.js, read-only):** `containerSelector` is
+used in exactly ONE place — `isInsideScraperContainer()` ->
+`el.closest(containerSelector)` — which only ever EXCLUDES a candidate
+whose ANCESTOR matches the selector. Every actual search
+(`candidateElements()`/`document.querySelectorAll`,
+`findPaginationRegions()`'s landmark/cluster queries,
+`findWithinRegion()`'s own `region.querySelectorAll`) operates on the
+WHOLE DOCUMENT or an independently-discovered region — never restricted
+to `containerSelector`'s own matches.
+
+**Disproved by direct execution:** new
+`tests/unit/pagination-not-scoped-to-container.test.js` (8 assertions,
+0 failures) builds EXACTLY the structure this round specified
+(`#search > .product-results-container [48 rows]` +
+`#search > .pagination > a.s-pagination-next`, pagination genuinely
+outside/sibling to the results wrapper) and runs the real, completely
+unmodified `findNextControl(containerSelector)` with the containerSelector
+scoped only to the 48 product rows. Result: `found: true`, `disabled:
+false`, `method: 'pagination-landmark'`, trigger navigates directly to
+the real `page=2&ref=sr_pg_1` target. Also proves 48 rows stay 48 and no
+sidebar/filter/related-search text leaks into extraction — all
+unaffected regardless of this investigation.
+
+**Conclusion:** container-selector scoping is NOT the current
+production bug. No code was changed (per explicit instruction: fix only
+after reproducing the failure — it could not be reproduced this way).
+The real production failure's exact cause remains open — the next real
+evidence needed is what production's OWN persisted
+`session.scraperConfig.containerSelector` and pagination diagnostic
+actually contain on the latest failing run, since this test proves the
+*architecture* is sound for the structural shape investigated here.
+
+**Files changed:** none in `content/`. New:
+`tests/unit/pagination-not-scoped-to-container.test.js` only.
+
+**Tests:** 36 unit test files, 1711 assertions, 0 failures, 0 crashed;
+release-check 19/19; full FAST: PASS.
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 7: TRIGGER FIX (synthetic click -> direct navigation)
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification.** Not
+committed/pushed — v1.1.0-verified tag untouched. Row detection and the
+stale-container-selector bug (Rounds 4-6) are confirmed fixed by the
+user's own real-browser evidence — this round is the next, distinct
+layer, traced through the ACTUAL production decision path per explicit
+instruction (no more autodetect.js changes, no more diagnostic tools).
+
+**Proven via direct execution of the real, unmodified
+`findNextControl()`:** the real Amazon Next anchor (`aria-label="Go to
+next page, page 2"`, `href` to `page=2`) IS found — `method:
+"pagination-landmark"` (its aria-label matches the loose "next"-text
+tier, not the exact-name tier, since "Go to next page, page 2" isn't an
+exact match for "next"/"next page"). Every text/rel-based detection tier
+(rel=next, exact accessible-name, this loose-text/bare-arrow region
+match) has always used `clickTrigger()` — a synthetic `MouseEvent`
+dispatch — even when the found element is a real `<a href>` whose
+destination is already known with certainty from the href itself. A
+synthetic click's default action is not guaranteed to reliably cause
+navigation on every real site.
+
+**Fix (`content/nextdetect.js` only):** `clickTrigger(el)` now checks
+whether `el` is a real anchor with an href that independently verifies
+as "points at a higher page" (`pointsAtHigherPage()` — the same narrow,
+already-proven check the href-based tiers already used) and, if so,
+returns a direct-navigation trigger instead of a synthetic click —
+centralized in ONE place so every detection tier benefits with zero
+call-site changes, including zero changes to `content/discovery.js`
+(which only ever calls `nextInfo.trigger()`, never caring how it's
+implemented). A control with no real advancing href (a JS-driven SPA
+control, `href="#"`, a plain `<button>`) still gets the synthetic click
+— completely unchanged.
+
+**Files changed:** `content/nextdetect.js` only (+39 lines net).
+`content/autodetect.js`/`content/discovery.js`/`content/content.js`:
+zero diff this round (confirmed — identical line counts to before). No
+new diagnostic tools added.
+
+**Regression test:** new `tests/unit/discovery-real-amazon-next-trigger.test.js`
+(9 assertions) — drives content/discovery.js's own real, test-exposed
+`runDiscoveryLoop()` (never a reimplementation) with page 1 already
+scraped and the EXACT real Amazon Next anchor DOM from the user's own
+evidence sitting outside the real product rows, stubbing only
+content/domwait.js's own timer mechanics (a separate, out-of-scope
+module) with a shim that still calls the real `trigger` callback and
+still resolves based on a real `location.href` change. Proves, end to
+end, through the real STAGE 1-16 loop: next candidate found, NOT
+finalized via `finalizeComplete('no-more-mechanisms')`,
+`paginationActionIssued: true`, and `location.href` genuinely set to the
+real `page=2&ref=sr_pg_1` URL — `outcome: 'url-changed'`,
+`paginationActionSucceeded: true`. Two earlier tests whose fixtures also
+have a real, valid Next href were updated to assert direct navigation
+instead of a synthetic click (the correct, improved behavior, not a
+regression) — `amazon-fragment-scoring-fix.test.js`,
+`stale-container-selector-migration-fix.test.js`.
+
+**Tests:** 35 unit test files, 1703 assertions, 0 failures, 0 crashed
+(every file individually verified); release-check 19/19; full FAST:
+PASS. No browser E2E run.
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 6: STALE CONTAINER-SELECTOR ROOT CAUSE FIXED
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification.** Not
+committed/pushed — v1.1.0-verified tag untouched. Root cause PROVEN by
+real-browser evidence from Round 5's diagnostic button (not guessed).
+
+**Proven root cause:** `content/content.js`'s `RUN_EXTRACTION` handler
+always reads `WSStorage.getState(hostname())` — the PERSISTED
+per-hostname `containerSelector`/`columns` — as the source of truth,
+regardless of what a fresh Auto Detect pass would find. Its own
+pre-existing `migrateContainerSelectorIfStale()` only ever re-validated
+a stored selector for being too NARROW (matching <= 2 elements, an old
+over-specific template) — never for being too BROAD. The real stale
+selector (`div.a-section.a-spacing-none`, matching 242 elements) sailed
+through completely unvalidated every single run. `popup.js`'s
+`handleStartLiveSession()` already correctly seeds
+`session.scraperConfig.containerSelector` from this SAME migrated
+value (a pre-existing, already-working mechanism — confirmed by reading
+that function's own header comment) — so the fix only needed to happen
+at the migration-validation layer, nowhere else. Because that same
+stale, broad selector was also what `content/discovery.js` handed to
+`content/nextdetect.js`'s `findNextControl()`, an over-broad selector
+correctly (from ITS own perspective) excluded the real Next control as
+"inside the scraper's own container" — `content/nextdetect.js` itself
+needed no change at all; fixing the selector at its source fixes both
+symptoms.
+
+**Fix (content/content.js only):** `migrateContainerSelectorIfStale()`
+now ALSO re-validates a selector that matches plenty of elements but
+whose own STORED COLUMNS rarely resolve together on the same instance
+(new `computeStoredColumnsCohesion()` — the same "row cohesion"
+invariant `content/autodetect.js`'s own detection pipeline already
+enforces at DETECTION time, reapplied here as a RUNTIME staleness check
+against whatever already happens to be sitting in storage). When
+confirmed stale this way, the EXISTING, already-proven re-anchoring
+mechanism (a live anchor via one of the stored columns' own
+relativeSelector, then `Sel.findRepeatingContainer` +
+`buildContainerSelector`) re-derives the correct container — only
+replacing the stored one when the replacement is measurably better
+(higher cohesion, no selector-scope drift of its own). The pre-existing
+too-narrow migration path is completely unchanged.
+
+**Files changed:** `content/content.js` only (+97/-9 lines).
+`content/autodetect.js`/`content/nextdetect.js`: zero diff this round
+(confirmed — diff line counts identical to before). Detail Enrichment,
+exports, STOP/RESUME, credits, storage.js, autoscroll/loadmore/
+pagination/autopaginate.js, cross-navigation, background.js — all zero
+diff.
+
+**Regression test:** new `tests/unit/stale-container-selector-migration-fix.test.js`
+(11 assertions) — loads the REAL, unmodified `content/content.js` +
+`content/selector.js` + `content/scraper.js` + `utils/storage.js`
+together, seeds a stale `.a-section.a-spacing-none` selector (matching
+>96 elements against 48 real cards, reproducing the exact real ratio),
+dispatches a real `RUN_EXTRACTION` message through content.js's own
+listener, and proves end-to-end: the stale selector is migrated to the
+true ~48-card selector; extraction produces ~48 rows; the corrected
+selector is persisted back to storage; using the OLD selector directly,
+the real `findNextControl()` still rejects the real Next control
+(bug reproduction); using the corrected one, it's found and its trigger
+fires on the real link.
+
+**Tests:** 34 unit test files, 1694 assertions, 0 failures, 0 crashed
+(every file individually verified); release-check 19/19; full FAST:
+PASS. No browser E2E run.
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 5: RAW EVIDENCE COLLECTION (no more guessing)
+
+**Status: awaiting real Amazon paste.** Round 4's fixes did NOT resolve
+the real-Chrome retest (still 168 rows / 1 page). Per explicit
+instruction, NO further speculative fixes to `content/autodetect.js` or
+`content/nextdetect.js` this round — both are confirmed byte-for-byte
+unchanged since round 4 (`git diff --stat` line counts match exactly).
+
+**New: a temporary, read-only "📋 Copy Real DOM Diagnostic" button** —
+Sonuçlar tab → ▸ Geliştirici Araçları, right after "Copy Next-Detect
+Diagnostic". New self-contained file `content/realdomdiag.js`: only
+reads `WSAutoDetect.runAutoDetectDiagnostic()`'s existing output
+(never calls `runAutoDetect()` itself) plus raw
+`document.querySelectorAll()` evidence — never references
+`WSNextDetect`, never clicks/triggers, never touches storage, never
+navigates. Reports: final selected containerSelector + matchedElementCount;
+every top candidate's selector/count/score/coverage/cohesion/
+fragmentation; the first 10 real elements the winning selector matches
+(tag/class/id/data-component-type/data-asin/nearest such ancestors/
+abbreviated outerHTML); page-wide `data-asin`/`[data-component-type="s-search-result"][data-asin]`
+counts; and, independently, raw matches for `.s-pagination-next`,
+`a.s-pagination-next`, `[aria-label*="Next" i]`, href-contains-`page=`,
+href-contains-`ref=sr_pg_`, plus the closest ancestor HTML for the
+visible pagination bar.
+
+**Files changed:** new `content/realdomdiag.js`; `background/background.js`
++ `popup/popup.js` (added to both CONTENT_FILES lists, per that file's
+own "kept in sync manually" convention); `popup/popup.html`/`popup/popup.js`
+(new panel/button/handler, same dev-gated pattern as every other Copy
+*Diagnostic button). `content/autodetect.js`/`content/nextdetect.js`:
+zero diff this round.
+
+**Tests:** new `tests/unit/realdom-diagnostic-wiring.test.js` (21
+assertions — proves isolation from nextdetect.js/autodetect.js's real
+detection call, no storage/navigation/click side effects, button wiring
+end-to-end). 33 unit test files, 1683 assertions, 0 failures;
+release-check 19/19; full FAST: PASS.
+
+**Next step:** user reloads the extension once, clicks the new button on
+the real Amazon tab, and pastes the output back for a genuine,
+non-speculative diagnosis.
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 4: FIELD-SELECTOR PRECISION + PAGINATION/CONTAINER DECOUPLING
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification.** Not
+committed/pushed — v1.1.0-verified tag untouched.
+
+**ROOT CAUSE A — field selector generation itself was poisoned
+(content/autodetect.js):** the real persisted Price relativeSelector was
+`span.a-color-base` — Amazon's own generic text-color utility class,
+reused for ratings/badges/filter labels/unrelated UI, never
+price-specific. `buildFieldCandidate()` now measures GLOBAL semantic
+precision (new `measureGlobalSelectorPrecision()`) for any field whose
+own samples predominantly look price-like (PRICE_RE): how many elements
+that exact selector matches page-wide, and what fraction also look
+price-like. Too-broad + low-precision → `tryEscalateFieldSelector()`
+tries a parent-scoped compound (built entirely from existing,
+unmodified `Sel.*` functions); if that's still not precise enough, the
+field is dropped rather than shipped poisoned. `PRICE_RE` itself
+extended to recognize ISO currency CODES (TRY, USD, EUR, ...) next to a
+number, not just symbols — real data contained "TRY 1,640.85", which the
+old symbol-only pattern never matched.
+
+**MISSION B (row container after clean fields):** already satisfied by
+the prior round's hard cohesion gate — unchanged this round.
+
+**ROOT CAUSE C — pagination was never actually scoped to the record
+container, but COULD be wrongly excluded by one
+(content/nextdetect.js):** audited every use of `containerSelector` in
+nextdetect.js — confirmed pagination discovery has ALWAYS searched the
+whole document (never restricted/scoped to inside the container); the
+only real coupling is the `isInsideScraperContainer` exclusion safety
+check, which can misfire when `containerSelector` itself is implausibly
+broad (exactly the real Amazon failure: a container selector that also
+wrapped the site's own pagination strip). New
+`effectiveContainerSelector()`: if a selector matches more than 50% of
+all page elements, it's no longer a plausible "one repeated record"
+selector and is no longer trusted for exclusion at all (computed once
+per `findNextControl()` call, not per-candidate). A normally-scoped
+selector is completely unaffected.
+
+**Real, previously-hidden production bug found via a test-infra fix (in
+scope, same layer):** `runAutoDetect()` never passed `siblingEls` (3rd
+arg) to `Sel.buildContainerSelector()`, so `commonStableClasses()` could
+never compute the classes actually common to every instance — it
+silently returned the REPRESENTATIVE element's own full class list
+unfiltered. A representative that happens to carry an extra
+per-instance class no sibling shares (a real, common shape — a
+"sponsored"/badge variant on some cards) produced a selector scoped to
+only that one variant. This was masked in every prior test by mini-dom's
+own single-class-selector-matching limit (silently ignoring every class
+after the first) — fixed alongside it (mini-dom now supports chained
+`.a.b.c` class selectors, and `classList` gained a `.contains()` method
+matching a real DOMTokenList, both real browser behavior). Fixed by
+passing `candidate.elements`/`rowsArr` as the 3rd arg at every call site
+of `Sel.buildContainerSelector`, plus a new under-match safety net
+(`realMatchCount < candidate.elements.length` → reject — under-matching
+is exactly as wrong as over-matching, never previously guarded).
+
+**Files changed:** `content/autodetect.js`, `content/nextdetect.js`
+only (`content/discovery.js`/`popup/*` diffs are earlier rounds'
+diagnostic-button wiring, untouched this round). New:
+`tests/unit/amazon-field-selector-precision-fix.test.js` (159
+assertions). `tests/lib/mini-dom.js`: multi-class selector support +
+`classList.contains()`. Detail Enrichment, exports, trial-credit,
+STOP/RESUME, storage architecture, cross-navigation,
+autopaginate/autoscroll/loadmore/pagination.js, background/ — zero diff.
+
+**Test proof:** fixture = 48 cards (no clean card-level class, disjoint
+title/price wrappers), Price wrapped in a bare `span.a-color-base`
+ALSO reused by 150 unrelated sidebar labels page-wide (198 total
+matches for the bare class, ~24% actually price-like — reproduces the
+mission's own "produce 150+ matches" ask). Accepted Price selector: NOT
+the bare poisoned one, matches ~48 elements page-wide (not 198), every
+extracted value is a genuine "TRY N.NN" price, zero sidebar-label
+leakage, Title+Price co-occur in 100% of rows. Pagination: using the OLD
+over-broad `.a-section` selector directly as `containerSelector`,
+`findNextControl()` now still finds the real Next control (previously
+`found:false` — this specific improvement flipped an existing test's
+own expected result, updated accordingly).
+
+**Tests:** 32 unit test files, 1662 assertions, 0 failures, 0 crashed
+(every single unit test file individually verified clean, not just the
+aggregate); release-check 19/19; full FAST: PASS. No browser E2E run —
+Etsy regression checked only via the existing unit suite (100% green);
+genuine real-Chrome Etsy re-verification remains outstanding.
+
+---
+
+## REAL AMAZON EVIDENCE — ROUND 3 ARCHITECTURE REBUILD (row inference + pagination)
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification.** Not
+committed/pushed — v1.1.0-verified tag untouched. This round explicitly
+replaced the previous round's SCORE-PENALTY approach with a HARD
+INVARIANT per the user's own instruction ("stop iterating with small
+heuristic patches... replace that decision rule").
+
+**PART A — field-anchored common-ancestor row inference
+(content/autodetect.js):** new `findFieldAnchoredCandidates()` finds
+every title-like heading page-wide and, for each, climbs its ancestor
+chain to the LOWEST ancestor that ALSO encloses a price-like value —
+GUARANTEEING co-occurrence by construction rather than hoping scoring
+rewards it. Boundary elements are grouped by structural signature so
+many titles resolving to the same card shape become ONE candidate.
+`consolidateFragmentedGroups`/`addAnchoredCandidates` (prior rounds)
+remain as fallbacks for single-field pages with no price signal to
+anchor against. The HARD GATE: in `runAutoDetect()`'s per-candidate
+loop, a candidate with 2+ detected fields whose `completeRatio`
+(computeRowCohesion) falls below `MIN_COHESION_RATIO=0.3` is REJECTED
+OUTRIGHT — never pushed to `structures`, at any score. Previous round's
+soft `cohesionPenalty` scoring line is gone entirely. FAIL-SAFE: if
+every surviving candidate was rejected by this gate and nothing else
+qualifies, `runAutoDetect()` returns `ok:false` with
+`failSafeReason` explaining Auto Detect could not find fields co-
+occurring in one record (already surfaced by the existing
+`msg.noStrongStructure` UI message, which already tells the user to use
+Manual Mode — no UI change needed).
+
+**PART B:** verified content/scraper.js's existing all-empty-row filter
+already satisfies "reject rows where all selected fields are empty,
+never delete rows with just one missing field" — no change made
+(untouched, confirmed via `git diff --stat`).
+
+**PART C — pagination-region-first Next detection
+(content/nextdetect.js):** rebuilt around discovering pagination
+REGIONS before evaluating signals, not flat page-wide tiers. The two
+strongest, most unambiguous signals (`<link rel=next>`, an explicit
+`rel="next"` element, an EXACT "Next"/"Sonraki" accessible name) stay
+page-wide and unchanged in priority — this is deliberately conservative,
+since they're already reliable and rescoping them adds risk for zero
+benefit. Everything weaker (loose text/bare-arrow match, structural
+"next after current page number" inference, an href that merely
+advances the page) is now evaluated PAGINATION-REGION-FIRST via new
+`findPaginationRegions()` (landmarks ∪ genuine page-number-cluster
+parents) → `findWithinRegion()`/`findClusterAdjacency()`, tried region
+by region. A page-wide href-page-number fallback remains as the final
+safety net for a page with numbered links but no recognizable
+landmark/cluster at all. Result now also exposes `href` (captured before
+the trigger fires); href-based signals use `navigateTrigger` (direct
+navigation) instead of a synthetic click, since the href was already
+independently verified to advance the page; text/rel-based semantic
+signals keep the synthetic `clickTrigger` (safer for JS-driven SPA
+pagination). `findNextControlDiagnostic()` fully rewritten to mirror the
+new structure — every region's own loose-text/adjacency/href sub-checks
+reported individually.
+
+**Files changed:** `content/autodetect.js`, `content/nextdetect.js`
+only (`content/discovery.js`/`popup/popup.html`/`popup/popup.js` diffs
+are the prior round's read-only diagnostic-button wiring, untouched
+this round). New: none this round (existing Amazon-mission test files
+updated in place to match the new architecture:
+`tests/unit/amazon-row-cohesion-and-pagination-fix.test.js`,
+`tests/unit/autodetect-row-scoping-fix.test.js`). Detail Enrichment,
+exports, trial-credit, STOP/RESUME, storage architecture,
+autopaginate.js/autoscroll.js/loadmore.js/pagination.js/background/ —
+zero diff.
+
+**Test proof:** same 48-card/disjoint-title-price/noisy-wrapper-class
+fixture as the previous round. BEFORE (hard gate disabled, simulating
+the old score-penalty design): the `.a-section` fragment candidate IS
+selectable (appears in `structures`). AFTER (shipped): completely
+ABSENT from `structures` — impossible to select, not merely outscored.
+Winner: 48 cards, Title+Price co-occur in 100% of extracted rows, zero
+garbage-text leakage. Pagination: page-wide Tiers 0-2 genuinely miss an
+icon-only Next (no text/aria-label); the rebuilt region-first pass finds
+it via structural cluster-adjacency; an unrelated numeric decoy doesn't
+break it; the trigger clicks the real button.
+
+**Tests:** 31 unit test files, 1503 assertions, 0 failures, 0 crashed;
+release-check 19/19; full FAST: PASS. No browser E2E run — Etsy
+regression could only be checked via the existing unit suite
+(discovery-core, discovery-storage-quota-safety, pagination-diag-buffer,
+final-ui-reorganization, amazon-pagination-fix — all still 100% green,
+unchanged assertion counts), never a live re-scrape; genuine real-Chrome
+Etsy re-verification remains outstanding.
+
+---
+
+## REAL AMAZON EVIDENCE FIX ROUND 2 — row cohesion + structural pagination fallback
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification.** Not
+committed/pushed — v1.1.0-verified tag untouched. Second evidence-driven
+round: real persisted `scraperConfig` now included the actual field
+selectors, which pinpointed the exact mechanism.
+
+**Real evidence:** `containerSelector: "div.a-section.a-spacing-none"`,
+`title: "h2.a-size-base-plus.a-spacing-none.a-color-base.a-text-normal"`,
+`price: "span.a-color-base"`. raw=242, duplicates=75, final=167 against
+~48 cards. Garbage rows ("Customer Reviews", "Color & Finish", "Brands",
+"Wattage", ratings, "TRY 1,640.85", "Amazon's Choice: Overall Pick", ...)
+plus the field selectors together prove Title and Price were each
+individually "detected" with nonzero coverage, but on almost entirely
+DISJOINT subsets of the 242 matched instances — Title only resolves on
+the instances that are title-rows, Price only on price-rows, never
+together. Pagination: `nextCandidateFound=false`,
+`outcome="no-next-candidate"` again.
+
+**ROW ROOT CAUSE:** no existing check ever verified that a candidate's
+OWN detected fields actually co-occur on the same repeated instance.
+`buildFieldCandidate`'s coverage check only ever required `coverage > 0`
+— a field appearing on 20% of instances still qualified as a proposed
+column, and different fields' nonzero coverage could concentrate on
+entirely different, non-overlapping subsets without anything noticing.
+
+**FIX (content/autodetect.js):**
+1. **Row cohesion (TASK 2/4)** — new `computeRowCohesion(fields,
+   allInstances)`: resolves every detected field against an
+   evenly-spread sample of the candidate's own instances and measures
+   how often fields resolve TOGETHER on the same instance
+   (`completeRatio`). Fed into `runAutoDetect()`'s per-candidate loop as
+   a penalty of up to 55 points — a multi-field candidate whose fields
+   never co-occur is crushed regardless of any other signal; a
+   single-field candidate (nothing to co-occur with) is untouched.
+2. **Anchored candidates (TASK 3)** — new `addAnchoredCandidates(groups)`:
+   for a candidate group whose representative element contains a
+   heading, climbs from that heading via `Sel.findRepeatingContainer()`
+   — the SAME, already-proven sibling-climbing algorithm Manual Mode's
+   click-to-select flow uses today — to structurally discover the true
+   record-level container, independent of whether it has any class of
+   its own. Added as one more ordinary candidate competing through the
+   identical scoring/cohesion pipeline.
+3. Diagnostics: `rowCohesion`, `cohesionPenaltyApplied`,
+   `scoreBeforeCohesion`, `anchoredFromHeading`, `anchoredCandidateCount`
+   now in `runAutoDetectDiagnostic()`'s output.
+
+**PAGINATION ROOT CAUSE:** Tiers 0-4 all require the Next control itself
+to carry an identifying signal (rel=next, matching text, a landmark
+class, or its own href advancing the page). A real, common shape none of
+them can ever find: an icon-only Next control (no text, no aria-label,
+sometimes a `<button>` with no href at all — JS-driven) sitting right
+after a run of page-number entries.
+
+**FIX (content/nextdetect.js):** new **Tier 5 — structural
+pagination-cluster fallback**. `findPageNumberCluster()` finds a genuine
+cluster of >= 3 sibling clickable elements whose accessible name is
+PURELY a page number (a generic, class-name-free pagination signature);
+`getCurrentPageNumber()` reads the current page from the URL (same
+implicit-page-1 convention as `pointsAtHigherPage`); Tier 5 then takes
+whichever clickable element comes immediately after the current page's
+own entry in that cluster, regardless of that element's own accessible
+name. Also new: **`findNextControlDiagnostic()`** (TASK 5) — a dev-only
+instrumented mirror of `findNextControl()` reporting every candidate
+inspected at every tier (text/aria-label/href/disabled/reject reason),
+never changing production behavior.
+
+**Files changed:** `content/autodetect.js`, `content/nextdetect.js`
+only. New: `tests/unit/amazon-row-cohesion-and-pagination-fix.test.js`
+(402 assertions). `tests/lib/mini-dom.js`: `MiniElement` now sets
+`nodeType = 1` (a real test-infra gap found this round — every real
+browser Element has this; `Sel.findRepeatingContainer()`'s own ancestor
+climb checks it and was silently short-circuiting after one step in
+every mini-dom-backed test until now). `content/discovery.js`/
+`autopaginate.js`/`autoscroll.js`/`loadmore.js`/`background/`/Detail
+Enrichment/exports/trial-credit/STOP-RESUME/cross-navigation — zero diff
+(confirmed via `git diff --stat`).
+
+**Test proof (TASK 1 trace, before/after scores):** fixture = 48 cards
+with NO clean shared class (noisy grid-utility classes only), Title and
+Price in disjoint `.a-section` fragments, 19 sidebar/filter/badge labels
+sharing the same class. With BOTH new rules disabled: fragment candidate
+scores 45 (vs. cards' 84). Fragmentation-penalty alone (prior mission):
+5. This mission's cohesion alone: 0. Shipped (both): 0. Winning structure
+(shipped): itemCount=48, `rowCohesion.completeRatio` >= 0.6, real
+extraction → exactly 48 rows, 100% with Title AND Price together, zero
+garbage-text leakage. Pagination: Tiers 0-4 all genuinely miss an
+icon-only Next (proven per-tier via the diagnostic); Tier 5 finds it,
+correctly rejects an unrelated lone numeric decoy, and its trigger
+clicks the real button.
+
+**Honest limitation carried over:** as in the previous round, I could
+not construct a fixture where the wrong candidate wins with ZERO new
+rules applied AND a reasonably shared card-wrapper class — some
+combination of real Amazon's actual markup (possibly even more
+inconsistent card classing than modeled here, or per-instance signal
+differences) is still not fully reproduced. What IS now proven directly
+from the real evidence itself: the exact field-selector shapes Amazon
+returned (disjoint title/price) are structurally impossible to score
+well post-fix, since cohesion is computed directly from resolving those
+same field selectors against the same instances — this is no longer a
+proxy signal, it's the literal mechanism the real diagnostic exposed.
+
+**Tests:** 31 unit test files, 1503 assertions, 0 failures, 0 crashed;
+release-check 19/19; full FAST: PASS. No browser E2E run.
+
+---
+
+## REAL AMAZON EVIDENCE FIX — fragment scoring (167 rows) + pagination side-effect
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification.** Not
+committed/pushed — v1.1.0-verified tag untouched. This mission is
+evidence-driven — diagnosed from the REAL persisted diagnostics of a
+failed run (Copy AUTO Diagnostic / Copy Pagination Diagnostic), not a
+hypothesis.
+
+**Real persisted evidence:** `https://www.amazon.com/s?k=desk+lamp` —
+raw=242, duplicates=75, datasetAfter=167 against ~48 real cards.
+Persisted `containerSelector: "div.a-section.a-spacing-none"` — Amazon's
+own generic internal utility-class combo, reused everywhere (card
+title/price/rating rows, the sidebar filter panel, badge/spec rows) —
+confirmed by the actual garbage rows collected ("Customer Reviews",
+"Color & Finish", "Brands", "Wattage", standalone ratings/prices,
+sidebar/filter text). Same run's pagination diagnostic: pagesVisited=1,
+nextCandidateFound=false, outcome="no-next-candidate",
+paginationActionIssued=false — never even attempted a click.
+
+**ROW ROOT CAUSE (content/autodetect.js):** the previous mission's
+`consolidateFragmentedGroups()` already computed, for every candidate
+folded together from many different DOM parents, exactly how many
+DISTINCT PARENTS its elements came from
+(`consolidatedFromParentCount`) — but that number was never fed back
+into `scoreCandidate()`. A consolidated candidate competed purely on
+content signals (link/image/price ratios, consistency), with nothing
+penalizing the one structural fact that separates "one row per record"
+from "several fragments per record": a genuine item container has close
+to ONE element per distinct parent; an internal layout primitive reused
+several times inside every card has SEVERAL.
+
+**PAGINATION ROOT CAUSE (not an independent nextdetect.js defect):**
+`content/nextdetect.js`'s `isInsideScraperContainer()` correctly rejects
+any candidate Next control whose ancestor matches the scraper's own
+`containerSelector` (never click inside my own repeating container) —
+but when that selector is as broad as `div.a-section.a-spacing-none`, it
+can legitimately also match an ancestor of the site's OWN pagination
+strip, wrongly excluding the real Next control at every tier. Proven
+directly in the new regression test: the SAME real, unmodified
+`findNextControl()` returns `found:false` against the old over-broad
+selector and `found:true` against the properly-scoped one, on the exact
+same fixture DOM.
+
+**FIX (content/autodetect.js only):**
+1. A fragmentation penalty in `computeCandidateSignals()`, scaled by
+   `elementsPerParent = itemCount / consolidatedFromParentCount` —
+   zero for any non-consolidated candidate (every previously-verified
+   site) or one whose ratio is already ~1.
+2. Evenly-spaced sampling (`sampleEvenly`) replacing "always sample the
+   first N elements" — byte-identical for any candidate with
+   `n <= 12` (every existing fixture); only changes behavior for a
+   large, heterogeneous, consolidated candidate, so a garbage-diluted
+   population can no longer hide behind a lucky run of early
+   clean-looking instances.
+3. Diagnostics extended: `elementsPerParent`, `fragmentationPenaltyApplied`,
+   `consolidatedFromParentCount` now surfaced per-candidate in
+   `runAutoDetectDiagnostic()`'s output (Copy AUTO Diagnostic).
+
+**Files changed:** `content/autodetect.js` only. New:
+`tests/unit/amazon-fragment-scoring-fix.test.js` (14 assertions).
+`content/discovery.js`/`nextdetect.js`/`autopaginate.js`/`autoscroll.js`/
+`loadmore.js`/`background/`/Detail Enrichment/export/trial-credit/
+STOP-RESUME/cross-navigation logic — all completely untouched (confirmed
+via `git diff --stat`).
+
+**Test proof:** fixture = 48 product cards (4 internal `.a-section` rows
+each) + 20 sidebar filter/facet elements ALSO carrying `.a-section` +
+a pagination strip wrapped in `.a-section` too. Winning structure:
+itemCount=48, selector never references `.a-section`, real extraction
+(unmodified `content/scraper.js`) → exactly 48 rows, zero
+sidebar/filter/pagination leakage. Using the winning selector, the real
+`findNextControl()` finds the pagination Next and its trigger clicks the
+real anchor (not a carousel-wrapped decoy). Using the OLD, over-broad
+`.a-section` selector directly, `findNextControl()` returns
+`found:false` — reproducing the real symptom exactly.
+
+**Honest limitation:** despite substantial effort with several
+adversarial fixture variants (uniform card class, split A/B card
+classes, fully dynamic/hash card+wrapper classes, Amazon-realistic noisy
+grid-utility classes), I could not construct a synthetic fixture where
+the pre-this-fix code actually picks the wrong (`.a-section`) candidate
+— in every variant, if the card level has ANY shared class at all
+(clean or noisy-but-consistent), it already wins on raw score. This
+means either (a) real Amazon's card wrapper has no usable shared class
+at all across all 48 (candidate never generated cleanly), or (b) some
+other structural difference in real Amazon markup makes the fragment
+candidate score higher than in my models. The delivered fix is real,
+evidence-driven, and directly implements the requested "penalize
+candidates where many internal fragments share one generic class"
+generically — verified via `git stash` to substantially cut a
+consolidated fragment candidate's score in a denser adversarial model
+(score 48 → 2 with the penalty applied) — but I cannot claim certainty
+it is sufficient on the real page without a live re-test. If the
+real-Chrome run still shows the wrong winner, Copy AUTO Diagnostic now
+directly answers whether the real "cards" candidate is even being
+generated/scored at all (look for it in `topCandidatesBeforeRanking`/
+`rejectedCandidates`) vs. losing despite the penalty.
+
+**Tests:** 30 unit test files, 1101 assertions, 0 failures, 0 crashed;
+release-check 19/19; full FAST: PASS. No browser E2E run (per this
+mission's own explicit instruction not to).
+
+---
+
+## AMAZON ROW/CONTAINER OVER-COUNTING FIX — 167 rows from ~48 real product cards
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification (same Amazon
+URL/search).** Not committed/pushed — v1.1.0-verified tag untouched.
+
+**Real report:** `https://www.amazon.com/s?k=desk+lamp` — page 1 has ~48
+visible product cards, ~340-350 total across ~7 pages, but the extension
+reported 167 UNIQUE rows from page 1 alone. Not primarily a pagination
+problem — the row/repeating-item detection was over-counting.
+
+**Fix (content/autodetect.js — the Auto Detect repeating-group scanner;
+content/discovery.js/nextdetect.js/autoscroll.js/loadmore.js/
+autopaginate.js/background/Detail Enrichment/export logic all completely
+untouched, confirmed via `git diff --stat`):**
+1. `consolidateFragmentedGroups()` — `scanRootForGroups()` groups
+   elements PER PARENT NODE, so a shared internal-layout/utility class
+   reused as direct siblings inside every product card (a design-system
+   class like Amazon's own `a-section`, used for one card's title row,
+   image row, price row, rating row) previously produced one SEPARATE
+   small candidate group PER CARD instead of being recognized as one
+   page-wide pattern. A same-signature (tag + stable classes) group
+   recurring under >= 4 distinct parents is now folded into ONE honest
+   candidate before scoring.
+2. A selector-scope-drift safety net in `runAutoDetect()`: after
+   `buildContainerSelector()` builds the real selector for a winning
+   candidate, if that selector's actual page-wide match count exceeds
+   3x what was locally detected, the candidate is rejected outright
+   rather than silently accepted — closing `buildContainerSelector`'s
+   own documented "best approximation" fallback tier (which can, in the
+   worst case, degrade all the way to a bare, completely unscoped tag
+   selector like `div` when neither a stable class nor a buildable
+   parent selector survives) as a possible over-count source.
+3. Honest diagnostics added throughout: `matchedElementCount` (the real
+   post-build match count, distinct from the pre-build candidate-size
+   guess), `rawGroupCountBeforeConsolidation`/`groupCountAfterConsolidation`,
+   `scopeDriftRejectedCount` — all exposed via
+   `runAutoDetectDiagnostic()`.
+
+**Files changed:** `content/autodetect.js`. New:
+`tests/lib/load-autodetect.js` (loads the real, unmodified
+`content/selector.js`+`content/autodetect.js`+`content/scraper.js` into
+one vm sandbox), `tests/unit/autodetect-row-scoping-fix.test.js` (13
+assertions). `tests/lib/mini-dom.js` extended (added `parentElement` and
+`.src` live-property getters — both required for `content/selector.js`'s
+real field-detection code to work at all against the fake DOM; added
+`createTreeWalker`/`matches`).
+
+**Test proof (before/after, same 48-card + 10-filter + 6-related-search
++ 7-pagination-link fixture):** the winning Auto Detect structure has
+`itemCount === 48` (not ~192, the 48-cards × 4-internal-rows fragment
+level), `containerSelector` never references the internal fragment
+class, and real extraction through the unmodified `content/scraper.js`
+produces exactly 48 rows — all distinct product links, 0 sidebar/
+filter/related-search/pagination leakage, sponsored cards correctly
+included, `WSSelector.countMatches(containerSelector) === 48`.
+
+**Tests:** 29 unit test files, 1087 assertions, 0 failures, 0 crashed;
+release-check 19/19; full FAST: PASS. No long-running browser E2E run
+(per this mission's own explicit instruction not to).
+
+**Honest residual risk — read before real-Chrome verification:** this
+fix targets two real, generically-defensible gaps in the candidate-
+grouping/selector-building pipeline that directly match the reported
+symptom class (~3.5 rows per card ≈ 167/48). However, live Amazon DOM
+could not be fetched from this environment to confirm the EXACT
+precondition. I built several adversarial synthetic fixtures attempting
+to reproduce the pre-fix failure directly (uniform card class, split
+A/B-variant card classes, fully dynamic/hash-only card+wrapper classes)
+— in every one, the PRE-FIX code already happened to select the correct
+48-card candidate, meaning I could not pin down in a unit test the exact
+DOM shape that made the wrong candidate win on the real page. The fix is
+real, tested, and strictly improves correctness/safety with zero
+regressions either way, but the real-Chrome run is the true confirmation
+here — use the new `matchedElementCount`/`rawGroupCountBeforeConsolidation`/
+`groupCountAfterConsolidation`/`scopeDriftRejectedCount` diagnostics
+(dev-only "Copy Auto Detect Diagnostic" style output) to see exactly
+what happened if row counts are still wrong.
+
+---
+
+## AMAZON PAGINATION FIX — real regression found in post-v1.1.0 cross-site verification
+
+**Status: IMPLEMENTED, awaiting real-Chrome re-verification (same Amazon
+URL/search).** Not committed/pushed — v1.1.0-verified tag untouched.
+
+**Real report:** `https://www.amazon.com/s?k=desk+lamp` — 167 unique
+records collected, then "1 sayfa tarandı" despite a visible, working
+Previous | 1 | 2 | 3 | ... | 7 | Next control.
+
+**Root cause (content/nextdetect.js, the generic Next-control detector —
+content/discovery.js, autoscroll.js, loadmore.js, autopaginate.js, and
+background.js all completely untouched):**
+1. `pointsAtHigherPage()` (Tier 4, the href-page-number fallback)
+   required BOTH the current AND candidate URL to already carry an
+   explicit page-number parameter/path before comparing them. Amazon's
+   own page-1 URL omits the parameter entirely (`?k=desk+lamp`, no
+   `&page=1`) — one of the most common real-world pagination
+   conventions generally, not an Amazon-specific quirk — so it could
+   never be recognized as "before" a candidate explicitly carrying
+   `&page=2`. Fixed: an absent page-number param/path on the CURRENT url
+   is now treated as implicit page 1 (still requires the candidate to
+   explicitly carry a real numeric value for the same known key/path —
+   never "trust an arbitrary param").
+2. Tier 3 (pagination-landmark) only ever searched a landmark's
+   DESCENDANTS (`landmark.querySelectorAll('a[href], button')`) — a real,
+   common pattern where the Next control's OWN class contains
+   "pagination" (rather than a separate wrapper) was silently never
+   checked against itself. Fixed: the landmark element itself is now
+   also checked when it's directly clickable.
+
+**Task A:** the old "Otomatik Sonraki"/"Otomatik Kaydırma" checkboxes
+(`#auto-next-toggle`/`#auto-scroll-toggle`) — already fully inert, never
+read by `handleStartLiveSession` — removed completely from popup.html/
+popup.js/i18n-data.js (not merely hidden). BAŞLA already started the
+Automatic Discovery Engine unconditionally; traced every reference
+first to confirm zero behavioral dependency before removing.
+
+**Files changed:** `content/nextdetect.js`, `popup/popup.html`,
+`popup/popup.js`, `utils/i18n-data.js`,
+`tests/unit/final-ui-reorganization.test.js` (2 stale assertions
+updated). New: `tests/lib/mini-dom.js`, `tests/unit/amazon-pagination-fix.test.js`
+(22 assertions). `content/discovery.js`/`autoscroll.js`/`loadmore.js`/
+`autopaginate.js`/`pagination.js`/`background/`/Detail Enrichment/export
+logic — all completely untouched (confirmed via `git diff --stat`).
+
+**Tests:** 28 unit test files, 1074 assertions, 0 failures, 0 crashed;
+release-check 19/19; full FAST: PASS. No long-running browser E2E run
+(per this mission's own explicit instruction not to).
+
+**Residual risk requiring real-Chrome verification:** these two fixes
+address the most plausible, code-provable generic gaps found via
+careful audit of `content/nextdetect.js` plus public documentation of
+Amazon's real, stable pagination markup (`a.s-pagination-next` inside
+`span.s-pagination-strip`) — live Amazon DOM could not be fetched
+directly from this environment (WebFetch returned HTTP 503) to confirm
+100%. If the real Chrome re-test still stops early, the next place to
+look is `isInsideScraperContainer()` — a container selector broader
+than intended (Amazon reuses very generic utility classes like
+`a-section` throughout the whole page, not just product cards) could
+still wrongly reject a genuinely-found Next control; the existing
+dev-only "Copy Pagination Diagnostic" panel's `lastPaginationAttempt`
+record is the fastest way to confirm or rule this out from a real run.
+
+---
+
 ## REAL CHROME VERIFIED v1.1.0
 
 - Etsy: 22 pages / 1263 unique records

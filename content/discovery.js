@@ -176,6 +176,51 @@
     try { return containerSelector ? document.querySelectorAll(containerSelector).length : 0; } catch (e) { return 0; }
   }
 
+  // REAL AMAZON EVIDENCE mission — CANONICAL SELECTOR OWNERSHIP:
+  // content/content.js's RUN_EXTRACTION handler already re-validates a
+  // freshly-read state.containerSelector against the live page
+  // (WSContent.migrateContainerSelectorIfStale — see that file for the
+  // full mechanism, including this round's own upgrade to prefer
+  // content/autodetect.js's own runAutoDetect() over the older
+  // single-anchor climb for an over-broad/low-cohesion selector) — but
+  // that only ever ran when a scrape was genuinely (re)started through
+  // RUN_EXTRACTION. A discovery session, once created, keeps running
+  // for its own entire lifetime purely off
+  // session.scraperConfig.containerSelector — read fresh every loop
+  // iteration, but was never re-validated against anything, and never
+  // reconnected to a newer ws_state::<hostname> a user may have since
+  // produced via a fresh Auto Detect pass. Two real, generic ways a
+  // session can end up carrying a stale selector for its own entire
+  // lifetime this way: (1) it was created before this project's own
+  // container-precision fixes existed; (2) content/discovery.js's own
+  // bootstrap-resume block (bottom of this file) picks up ANY
+  // `stillRunning()` session on every fresh content-script injection —
+  // a real page reload/extension reload included — and hands it
+  // straight back into this exact loop with its own frozen-in-time
+  // config, completely independent of whatever a newer Auto Detect
+  // result says.
+  //
+  // Calls the EXACT SAME function content.js's RUN_EXTRACTION already
+  // uses (window.WSContent.migrateContainerSelectorIfStale — exported
+  // specifically so this file never needs its own divergence-prone
+  // copy) directly against session.scraperConfig (identical
+  // {containerSelector, columns} shape migrateContainerSelectorIfStale
+  // already expects and mutates in place), applied exactly ONCE, at the
+  // START of this function's own run — covering both a genuinely fresh
+  // START_DISCOVERY and a resumed instance's very first pass — never
+  // re-run per page (a session's own selector must stay CONSISTENT
+  // across all its pages once validated).
+  function revalidateScraperConfigIfStale(scraperConfig) {
+    if (!root.WSContent || typeof root.WSContent.migrateContainerSelectorIfStale !== 'function') {
+      return { templateMigrationPerformed: false };
+    }
+    try {
+      return root.WSContent.migrateContainerSelectorIfStale(scraperConfig);
+    } catch (e) {
+      return { templateMigrationPerformed: false, error: (e && e.message) || String(e) };
+    }
+  }
+
   /** BUG REOPEN (action-ownership diagnostics): a lightweight, diagnostic-
    * ONLY content fingerprint for STEP 4's own pagination-attempt record
    * (below) — proves whether the on-screen content actually changed
@@ -499,6 +544,22 @@
         return;
       }
       session = ensureInternalEngines(session);
+
+      // REAL AMAZON EVIDENCE mission — see revalidateScraperConfigIfStale's
+      // own header comment for the full "canonical selector ownership"
+      // rationale. Applied exactly ONCE, on this function's own very
+      // first iteration (covers both a genuinely fresh START_DISCOVERY
+      // and a bootstrap-resumed instance's first pass) — never
+      // re-applied per page, so a session's own selector stays
+      // consistent across every page it visits once validated.
+      if (firstIteration) {
+        var selectorDiag = revalidateScraperConfigIfStale(session.scraperConfig);
+        if (selectorDiag.templateMigrationPerformed) {
+          console.log('[WS-PAGE-DIAG] STAGE 1: canonical containerSelector re-validated and migrated at loop start.', JSON.stringify(selectorDiag));
+          pushPageDiag('STAGE 1 canonical-selector-migrated', { page: session.discovery.pagesVisited, discoveryStatus: session.discovery.status, reason: 'canonical-selector-migrated' });
+          await setSession(host, session);
+        }
+      }
       var cs = session.scraperConfig.containerSelector;
 
       // [WS-PAGE-DIAG] TEMPORARY — real production report: main
@@ -1067,6 +1128,34 @@
     if (message.type === 'GET_DISCOVERY_STATE') {
       getSession(hostname()).then(function (session) {
         sendResponse({ ok: true, discovery: (session && session.discovery) || null, rowCount: session ? session.rows.length : 0 });
+      });
+      return true;
+    }
+
+    // REAL AMAZON EVIDENCE mission — read-only, dev-only diagnostic:
+    // mirrors the EXACT containerSelector production pagination actually
+    // uses (session.scraperConfig.containerSelector, the same variable
+    // this file's own runDiscoveryLoop() reads at STAGE 10 above — see
+    // `var cs = session.scraperConfig.containerSelector;`), then hands it
+    // to content/nextdetect.js's own, completely unmodified
+    // findNextControlDiagnostic() — a pure DOM-inspection mirror of
+    // findNextControl() that records every candidate examined at every
+    // tier instead of stopping at the first match. getSession() is a
+    // plain storage READ (identical to GET_DISCOVERY_STATE just above);
+    // nothing here ever writes to storage, starts a scrape, reloads the
+    // page, or calls a `trigger` (findNextControlDiagnostic() never
+    // clicks anything, unlike findNextControl()'s own return value).
+    if (message.type === 'RUN_NEXT_DETECT_DIAGNOSTIC') {
+      getSession(hostname()).then(function (session) {
+        var cs = (session && session.scraperConfig) ? session.scraperConfig.containerSelector : null;
+        try {
+          var report = root.WSNextDetect.findNextControlDiagnostic(cs);
+          sendResponse({ ok: true, report: report });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e && e.message || e) });
+        }
+      }).catch(function (e) {
+        sendResponse({ ok: false, error: String(e && e.message || e) });
       });
       return true;
     }

@@ -145,6 +145,14 @@
     paginationDiagCopyBtn: document.getElementById('pagination-diag-copy-btn'),
     paginationDiagStatus: document.getElementById('pagination-diag-status'),
     paginationDiagTextarea: document.getElementById('pagination-diag-textarea'),
+    nextDetectDiagPanel: document.getElementById('nextdetect-diag-panel'),
+    nextDetectDiagCopyBtn: document.getElementById('nextdetect-diag-copy-btn'),
+    nextDetectDiagStatus: document.getElementById('nextdetect-diag-status'),
+    nextDetectDiagTextarea: document.getElementById('nextdetect-diag-textarea'),
+    realDomDiagPanel: document.getElementById('realdom-diag-panel'),
+    realDomDiagCopyBtn: document.getElementById('realdom-diag-copy-btn'),
+    realDomDiagStatus: document.getElementById('realdom-diag-status'),
+    realDomDiagTextarea: document.getElementById('realdom-diag-textarea'),
     healthCheckPanel: document.getElementById('health-check-panel'),
     resultsDevtoolsPanel: document.getElementById('results-devtools-panel'),
     stickyStatusBar: document.getElementById('sticky-status-bar'),
@@ -200,7 +208,12 @@
     exportGate: document.getElementById('export-gate'),
 
     // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next)
-    autoNextToggle: document.getElementById('auto-next-toggle'),
+    // AMAZON PAGINATION FIX mission: the old #auto-next-toggle checkbox
+    // itself is REMOVED (popup.html) and its mapping here removed with
+    // it — it was already fully inert (never read by handleStartLiveSession).
+    // autoPaginateStatus itself stays: still genuinely used to render the
+    // legacy explicit-toggle session status line for a pre-existing
+    // session created before the Automatic Discovery Engine shipped.
     autoPaginateStatus: document.getElementById('auto-paginate-status'),
     durdurBtn: document.getElementById('durdur-btn'),
 
@@ -222,7 +235,9 @@
     discoverySummaryInvalid: document.getElementById('discovery-summary-invalid'),
 
     // NEW FEATURE — INFINITE SCROLL (Auto Scroll)
-    autoScrollToggle: document.getElementById('auto-scroll-toggle'),
+    // AMAZON PAGINATION FIX mission: #auto-scroll-toggle removed the same
+    // way as #auto-next-toggle above — autoScrollStatus itself stays for
+    // the same legacy-session reason.
     autoScrollStatus: document.getElementById('auto-scroll-status'),
 
     toggleFilterBtn: document.getElementById('toggle-filter-btn'),
@@ -613,7 +628,8 @@
     'content/autopaginate.js',
     'utils/discovery.js',
     'content/loadmore.js',
-    'content/discovery.js'
+    'content/discovery.js',
+    'content/realdomdiag.js'
   ];
   // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next): content/nextdetect.js
   // + content/autopaginate.js. See background.js's identical addition/
@@ -1987,6 +2003,229 @@
     }
   }
 
+  /** DEV ONLY — same reachability contract as revealPaginationDiagPanelIfDev()
+   * above. REAL AMAZON EVIDENCE mission — real production report: a
+   * generic Next-page control was not being found, and content/
+   * nextdetect.js's own findNextControl() gives no visibility into WHY
+   * (which tier looked at which candidate and rejected it). */
+  async function revealNextDetectDiagPanelIfDev() {
+    if (!els.nextDetectDiagPanel) return;
+    var isDev = false;
+    try { isDev = await WSLicense.isDevelopmentInstall(); } catch (e) { isDev = false; }
+    els.nextDetectDiagPanel.hidden = !isDev;
+  }
+
+  /** Formats content/nextdetect.js's own findNextControlDiagnostic()
+   * report — a read-only mirror of findNextControl()'s exact tier order
+   * (0: <link rel=next>, 1: rel=next element, 2: exact accessible-name,
+   * 3: pagination-landmark, 4: href page-number fallback, 5: structural
+   * page-number-cluster adjacency), listing every candidate the real
+   * function actually inspected at every tier and why each one was or
+   * wasn't accepted. */
+  function formatNextDetectDiagnosticReport(report) {
+    var lines = [];
+    lines.push('=== Next-Detect Diagnostic ===');
+    lines.push('Generated: ' + new Date().toISOString());
+    lines.push('Extension version: ' + (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '?'));
+    lines.push('Page URL: ' + (report && report.url));
+    lines.push('containerSelector used (from the CURRENT session\'s already-persisted scraperConfig, never re-detected here): ' + (report && report.containerSelector));
+    lines.push('');
+    function formatCandidateLine(c, i) {
+      return '    [' + i + '] tag=' + c.tag + ' text=' + JSON.stringify(c.text) + ' ariaLabel=' + JSON.stringify(c.ariaLabel) +
+        ' title=' + JSON.stringify(c.title) + ' href=' + JSON.stringify(c.href) + ' disabled=' + c.disabled +
+        ' rejectedExcludedWrapper=' + c.rejectedExcludedWrapper + ' rejectedInsideScraperContainer=' + c.rejectedInsideScraperContainer +
+        (c.matchedVia ? (' matchedVia=' + c.matchedVia) : '') + ' -> ' + (c.rejected ? 'REJECTED' : 'ACCEPTED');
+    }
+    if (report && report.regionDiscovery) {
+      var rd = report.regionDiscovery;
+      lines.push('--- Pagination region discovery (PART C rebuild) ---');
+      lines.push('    landmarks found on page: ' + rd.landmarksFound);
+      lines.push('    page-number cluster found: ' + rd.clusterFound + (rd.clusterFound ? (' (entries=' + rd.clusterEntryCount + ')') : ''));
+      lines.push('    current page number (from URL): ' + rd.currentPageNumber);
+      lines.push('    regions to try, in order: ' + rd.regionsToTry);
+      lines.push('');
+    }
+    (report && report.tiers || []).forEach(function (t) {
+      lines.push('--- Tier ' + t.tier + ' (' + t.name + ') — found=' + t.found + ' ---');
+      if (typeof t.href === 'string') lines.push('    href: ' + t.href);
+      (t.candidatesInspected || []).forEach(function (c, i) { lines.push(formatCandidateLine(c, i)); });
+      if (t.regions) {
+        t.regions.forEach(function (r, ri) {
+          lines.push('    region[' + ri + '] = ' + r.regionPath);
+          lines.push('      loose-text/bare-arrow: found=' + r.looseTextFound);
+          (r.looseTextCandidatesInspected || []).forEach(function (c, i) { lines.push('  ' + formatCandidateLine(c, i)); });
+          lines.push('      cluster-adjacency: checked=' + r.clusterAdjacencyChecked + ' found=' + r.clusterAdjacencyFound);
+          (r.clusterAdjacencyCandidatesInspected || []).forEach(function (c, i) { lines.push('  ' + formatCandidateLine(c, i)); });
+          lines.push('      href-page-number (region-scoped): found=' + r.hrefFound);
+          (r.hrefCandidatesInspected || []).forEach(function (c, i) { lines.push('  ' + formatCandidateLine(c, i)); });
+        });
+      }
+      if (!(t.candidatesInspected || []).length && !(t.regions || []).length && t.tier !== 0) lines.push('    (no candidates matched this tier\'s own criteria at all)');
+    });
+    lines.push('');
+    lines.push('=== Final result ===');
+    lines.push(JSON.stringify(report && report.result));
+    lines.push('');
+    lines.push('--- Full raw JSON (everything above, machine-readable) ---');
+    lines.push(JSON.stringify(report));
+    return lines.join('\n');
+  }
+
+  /** Read-only: sends RUN_NEXT_DETECT_DIAGNOSTIC to the content script
+   * (content/discovery.js's own handler — a plain getSession() read of
+   * the CURRENT session's already-persisted scraperConfig.containerSelector,
+   * then content/nextdetect.js's findNextControlDiagnostic() against the
+   * CURRENT page DOM). sendToContent() only injects the content scripts
+   * if they aren't already present in this tab (same as every other Copy
+   * *Diagnostic button) — never reloads the page. Never starts a scrape,
+   * never resets the session, never writes to storage, never clicks
+   * anything; findNextControlDiagnostic() itself never calls a `trigger`. */
+  async function handleCopyNextDetectDiagnostic() {
+    if (els.nextDetectDiagStatus) els.nextDetectDiagStatus.textContent = 'Reading Next-detect diagnostic…';
+    if (els.nextDetectDiagTextarea) els.nextDetectDiagTextarea.hidden = true;
+    var res;
+    try {
+      res = await sendToContent({ type: 'RUN_NEXT_DETECT_DIAGNOSTIC' });
+    } catch (e) {
+      if (els.nextDetectDiagStatus) els.nextDetectDiagStatus.textContent = 'Diagnostic failed: ' + (e && e.message || e);
+      return;
+    }
+    if (!res || !res.ok) {
+      if (els.nextDetectDiagStatus) els.nextDetectDiagStatus.textContent = 'Diagnostic failed: ' + (res && res.error || 'no response from the page');
+      return;
+    }
+    var text = formatNextDetectDiagnosticReport(res.report);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (els.nextDetectDiagStatus) els.nextDetectDiagStatus.textContent = 'Copied to clipboard (' + text.length + ' characters). Paste it back.';
+    } catch (e) {
+      if (els.nextDetectDiagStatus) els.nextDetectDiagStatus.textContent = 'Clipboard unavailable — select all the text below and copy it manually.';
+      if (els.nextDetectDiagTextarea) {
+        els.nextDetectDiagTextarea.hidden = false;
+        els.nextDetectDiagTextarea.value = text;
+        els.nextDetectDiagTextarea.focus();
+        els.nextDetectDiagTextarea.select();
+      }
+    }
+  }
+
+  /** DEV ONLY — same reachability contract as the diagnostics above.
+   * REAL AMAZON EVIDENCE mission — TEMPORARY: every unit fixture built
+   * so far has been proven, by repeated real-Chrome retests, to not
+   * represent the real Amazon DOM closely enough. This button captures
+   * raw evidence from the real page instead of another guess. */
+  async function revealRealDomDiagPanelIfDev() {
+    if (!els.realDomDiagPanel) return;
+    var isDev = false;
+    try { isDev = await WSLicense.isDevelopmentInstall(); } catch (e) { isDev = false; }
+    els.realDomDiagPanel.hidden = !isDev;
+  }
+
+  /** Formats content/realdomdiag.js's own collectRealDomDiagnostic()
+   * report into a readable + full-JSON paste, same two-part shape every
+   * other Copy *Diagnostic report already uses. */
+  function formatRealDomDiagnosticReport(report) {
+    var lines = [];
+    lines.push('=== Real DOM Diagnostic ===');
+    lines.push('Generated: ' + (report && report.generatedAt));
+    lines.push('Extension version: ' + (chrome.runtime.getManifest ? chrome.runtime.getManifest().version : '?'));
+    lines.push('Page URL: ' + (report && report.url));
+    lines.push('');
+    var rd = (report && report.rowDetection) || {};
+    lines.push('--- A) ROW DETECTION ---');
+    lines.push('final selected containerSelector: ' + rd.finalSelectedContainerSelector);
+    lines.push('finalMatchedElementCount: ' + rd.finalMatchedElementCount);
+    lines.push('winnerReason: ' + rd.winnerReason);
+    lines.push('finalStructureCount=' + rd.finalStructureCount + ' rejectedCandidateCount=' + rd.rejectedCandidateCount + ' cohesionRejectedCount=' + rd.cohesionRejectedCount + ' scopeDriftRejectedCount=' + rd.scopeDriftRejectedCount);
+    lines.push('fragmentGroupsConsolidated=' + rd.fragmentGroupsConsolidated + ' anchoredCandidateCount=' + rd.anchoredCandidateCount + ' fieldAnchoredCandidateCount=' + rd.fieldAnchoredCandidateCount);
+    lines.push('uniqueNonEmptyDataAsinCount: ' + rd.uniqueNonEmptyDataAsinCount);
+    lines.push('[data-component-type="s-search-result"][data-asin] count: ' + rd.searchResultComponentCount);
+    lines.push('');
+    lines.push('-- top candidates --');
+    (rd.topCandidates || []).forEach(function (c, i) {
+      lines.push('[' + i + '] selector=' + JSON.stringify(c.selector) + ' elementCount=' + c.elementCount + ' score=' + c.score);
+      lines.push('    cohesion=' + JSON.stringify(c.cohesion) + ' fragmentationPenaltyApplied=' + c.fragmentationPenaltyApplied + ' elementsPerParent=' + c.elementsPerParent + ' consolidatedFromParentCount=' + c.consolidatedFromParentCount);
+      lines.push('    anchoredFromHeading=' + c.anchoredFromHeading + ' fieldAnchored=' + c.fieldAnchored + ' source=' + c.source);
+      lines.push('    coveragePerField=' + JSON.stringify(c.coveragePerField));
+    });
+    lines.push('');
+    lines.push('-- rejected candidates --');
+    (rd.rejectedCandidates || []).forEach(function (c, i) {
+      lines.push('[' + i + '] approxSelector=' + JSON.stringify(c.approxSelector) + ' itemCount=' + c.itemCount + ' score=' + c.score + ' -> ' + c.rejectionReason);
+    });
+    lines.push('');
+    lines.push('-- first 10 matched row elements (of the final selected selector) --');
+    (rd.firstRowElements || []).forEach(function (el) {
+      lines.push('[' + el.index + '] tag=' + el.tagName + ' class=' + JSON.stringify(el.className) + ' id=' + JSON.stringify(el.id) +
+        ' data-component-type=' + JSON.stringify(el.dataComponentType) + ' data-asin=' + JSON.stringify(el.dataAsin));
+      lines.push('    nearestAncestorWithDataComponentType=' + JSON.stringify(el.nearestAncestorWithDataComponentType));
+      lines.push('    nearestAncestorWithDataAsin=' + JSON.stringify(el.nearestAncestorWithDataAsin));
+      lines.push('    outerHTML: ' + el.outerHTMLAbbrev);
+    });
+    lines.push('');
+
+    var pg = (report && report.pagination) || {};
+    lines.push('--- B) REAL PAGINATION DOM ---');
+    ['dotSPaginationNext', 'aDotSPaginationNext', 'ariaLabelNextUpper', 'ariaLabelNextLower', 'hrefContainsPageParam', 'hrefContainsRefSrPg'].forEach(function (key) {
+      var section = pg[key];
+      if (!section) return;
+      lines.push('-- ' + key + (section.selector ? ' (' + section.selector + ')' : '') + ' — count=' + section.count + ' --');
+      (section.elements || []).forEach(function (el, i) {
+        lines.push('  [' + i + '] tag=' + el.tagName + ' class=' + JSON.stringify(el.className) + ' text=' + JSON.stringify(el.textContent) +
+          ' ariaLabel=' + JSON.stringify(el.ariaLabel) + ' href=' + JSON.stringify(el.href) + ' rel=' + JSON.stringify(el.rel) +
+          ' disabled=' + el.disabled + ' ariaDisabled=' + JSON.stringify(el.ariaDisabled) + ' parent=' + el.parentTagName + '.' + JSON.stringify(el.parentClassName));
+        lines.push('      outerHTML: ' + el.outerHTMLAbbrev);
+      });
+    });
+    lines.push('');
+    lines.push('-- pagination bar (closest ancestor containing Previous/page numbers/Next) --');
+    if (pg.paginationBar) {
+      lines.push('tag=' + pg.paginationBar.tagName + ' class=' + JSON.stringify(pg.paginationBar.className) + (pg.paginationBar.note ? (' note=' + pg.paginationBar.note) : ''));
+      if (pg.paginationBar.outerHTMLAbbrev) lines.push('outerHTML: ' + pg.paginationBar.outerHTMLAbbrev);
+    }
+    lines.push('');
+    lines.push('--- Full raw JSON (everything above, machine-readable) ---');
+    lines.push(JSON.stringify(report));
+    return lines.join('\n');
+  }
+
+  /** Read-only: sends RUN_REAL_DOM_DIAGNOSTIC to the content script
+   * (content/realdomdiag.js's own listener — pure document.* reads plus
+   * one call into content/autodetect.js's own pre-existing
+   * runAutoDetectDiagnostic(); never touches content/nextdetect.js,
+   * never scrapes, never navigates, never clicks, never writes to
+   * storage). sendToContent() only injects content scripts if they
+   * aren't already present in this tab (same as every other Copy
+   * *Diagnostic button) — never reloads the page. */
+  async function handleCopyRealDomDiagnostic() {
+    if (els.realDomDiagStatus) els.realDomDiagStatus.textContent = 'Reading real DOM diagnostic…';
+    if (els.realDomDiagTextarea) els.realDomDiagTextarea.hidden = true;
+    var res;
+    try {
+      res = await sendToContent({ type: 'RUN_REAL_DOM_DIAGNOSTIC' });
+    } catch (e) {
+      if (els.realDomDiagStatus) els.realDomDiagStatus.textContent = 'Diagnostic failed: ' + (e && e.message || e);
+      return;
+    }
+    if (!res || !res.ok) {
+      if (els.realDomDiagStatus) els.realDomDiagStatus.textContent = 'Diagnostic failed: ' + (res && res.error || 'no response from the page');
+      return;
+    }
+    var text = formatRealDomDiagnosticReport(res.report);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (els.realDomDiagStatus) els.realDomDiagStatus.textContent = 'Copied to clipboard (' + text.length + ' characters). Paste it back.';
+    } catch (e) {
+      if (els.realDomDiagStatus) els.realDomDiagStatus.textContent = 'Clipboard unavailable — select all the text below and copy it manually.';
+      if (els.realDomDiagTextarea) {
+        els.realDomDiagTextarea.hidden = false;
+        els.realDomDiagTextarea.value = text;
+        els.realDomDiagTextarea.focus();
+        els.realDomDiagTextarea.select();
+      }
+    }
+  }
+
   // ================= SELF-DIAGNOSTICS / HEALTH CHECK ("Sağlık Kontrolü") =================
   // Dev-only observability layer over the FULL main-scrape/Detail
   // lifecycle — never mutates/resets/restarts anything (diagnoses only).
@@ -2775,13 +3014,16 @@
       // AUTOMATIC DATA DISCOVERY ENGINE (mission's own central product
       // rule): the user is never asked to choose pagination vs. infinite
       // scroll vs. Load More vs. a hybrid of them — ClickScrape decides
-      // automatically (content/discovery.js) and always runs it. The
-      // legacy `auto-next-toggle`/`auto-scroll-toggle` checkboxes are
-      // deliberately left in the DOM (a later, purely-UI mission removes/
-      // hides them — see CLAUDE.md's own scope note for this mission) but
-      // their checked state is no longer read here: reading it would
-      // reintroduce exactly the "user must decide how the site exposes
-      // more results" choice this engine exists to remove. The legacy
+      // automatically (content/discovery.js) and always runs it. The old
+      // `auto-next-toggle`/`auto-scroll-toggle` checkboxes this comment
+      // used to describe as "deliberately left in the DOM" were removed
+      // completely by the AMAZON PAGINATION FIX mission (real production
+      // report: a user could reasonably read their mere presence as "you
+      // may need to enable one of these" even though nothing here ever
+      // read them) — reading their checked state was, and remains, never
+      // done: doing so would reintroduce exactly the "user must decide
+      // how the site exposes more results" choice this engine exists to
+      // remove. The legacy
       // `session.autoPaginate`/`session.autoScroll` fields (still read by
       // content/autopaginate.js's/content/autoscroll.js's OWN independent
       // standalone message handlers and bootstraps) are deliberately never
@@ -2931,6 +3173,8 @@
       setStatus('');
       revealSessionDiagPanelIfDev();
       revealPaginationDiagPanelIfDev();
+      revealNextDetectDiagPanelIfDev();
+      revealRealDomDiagPanelIfDev();
       revealHealthCheckPanelIfDev();
       revealResultsDevToolsPanelIfDev();
       if (!watchStarted) {
@@ -3405,6 +3649,44 @@
       if (!alreadyProcessed) rawRows = activeLiveSession.rows;
       invalidateTransformCache();
       renderResults();
+      // DETAIL ENRICHMENT MERGE-LOSS FIX — real production report: a
+      // COMPLETED Detail Enrichment run's own extracted values (weight/
+      // dimensions/materyal/... 7 real fields) showed up as column
+      // headers in the export but with EVERY row blank, even though
+      // storage held the real extracted data and mergeDetailResults()
+      // had already merged it correctly at least once.
+      //
+      // ROOT CAUSE: mergeDetailResults() only ever mutates the in-memory
+      // `rawRows` array — by design (see its own header comment), it
+      // never writes dt_* values back into ws_live_session storage. The
+      // `rawRows = activeLiveSession.rows;` line right above this
+      // comment replaces `rawRows` WHOLESALE with a fresh copy straight
+      // from storage every time this listener fires — and it keeps
+      // firing for as long as session.status stays 'active', long after
+      // the main scrape itself is done: content/livewatch.js's own
+      // passive MutationObserver-driven rescan keeps running on the
+      // original scrape tab the entire time it stays open (ads,
+      // carousels, lazy-loaded widgets — virtually guaranteed to mutate
+      // the DOM at least once during a multi-minute, many-URL Detail
+      // run) and re-persists this exact same session key on every pass,
+      // completely independent of Detail Enrichment. That storage
+      // version of `rows` has never seen a single dt_* value, so the
+      // very next such write — arriving any time after Detail
+      // completed, while the user is still looking at Results — silently
+      // wiped every already-merged Detail column back to blank, with no
+      // error of any kind.
+      //
+      // FIX: re-run the exact same, already-correct, URL-keyed
+      // hydrateDetailResultsIfAny() every time this listener replaces
+      // `rawRows` — it only ever reads data a TERMINAL Detail run already
+      // finished writing (never a new fetch/navigation, never re-charges
+      // anything), so this is a pure, safe re-application of already-
+      // known results onto whichever row list is current now. A Detail
+      // run that is still actively RUNNING is unaffected: its own live
+      // attachDetailStorageListener()/renderDetailProgress() path keeps
+      // merging exactly as it always did once it reaches ITS OWN terminal
+      // state, independent of this listener.
+      hydrateDetailResultsIfAny().catch(function () { /* best-effort — never blocks the normal live-row update above */ });
     });
   }
 
@@ -3515,6 +3797,8 @@
     }
     revealSessionDiagPanelIfDev();
     revealPaginationDiagPanelIfDev();
+    revealNextDetectDiagPanelIfDev();
+    revealRealDomDiagPanelIfDev();
     revealHealthCheckPanelIfDev();
     revealResultsDevToolsPanelIfDev();
     switchTab('results');
@@ -10535,6 +10819,8 @@
     // button) stays `hidden` unless revealPaginationDiagPanelIfDev()
     // confirms an unpacked/development install.
     if (els.paginationDiagCopyBtn) els.paginationDiagCopyBtn.addEventListener('click', handleCopyPaginationDiagnostic);
+    if (els.nextDetectDiagCopyBtn) els.nextDetectDiagCopyBtn.addEventListener('click', handleCopyNextDetectDiagnostic);
+    if (els.realDomDiagCopyBtn) els.realDomDiagCopyBtn.addEventListener('click', handleCopyRealDomDiagnostic);
     // SELF-DIAGNOSTICS / HEALTH CHECK — same dev-only reachability
     // contract as the two lines above; #health-check-panel (and
     // therefore these buttons) stays `hidden` unless

@@ -56,8 +56,15 @@ async function run() {
       'transforms (preview reset)': 'reset-transforms-btn',
       'templates': 'templates-btn',
       'saved scrapers': 'save-scraper-btn',
-      'auto-next (legacy toggle, preserved not deleted)': 'auto-next-toggle',
-      'auto-scroll (legacy toggle, preserved not deleted)': 'auto-scroll-toggle',
+      // 'auto-next (legacy toggle)': 'auto-next-toggle' / 'auto-scroll
+      // (legacy toggle)': 'auto-scroll-toggle' — REMOVED (AMAZON
+      // PAGINATION FIX mission, real production report): these two
+      // checkboxes were already fully inert (never read by
+      // handleStartLiveSession) and were removed from the DOM entirely,
+      // not merely hidden — see tests/unit/amazon-pagination-fix.test.js
+      // for the proof this was a real, deliberate removal, and that
+      // BAŞLA's own real handler still starts Discovery correctly with
+      // them gone.
       'start (BAŞLA)': 'basla-btn',
       'stop (DURDUR)': 'durdur-btn',
       'finish (BİTİR)': 'bitir-btn'

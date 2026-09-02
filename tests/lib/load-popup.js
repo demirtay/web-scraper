@@ -83,7 +83,16 @@ async function loadPopup(opts) {
       get: function (keys, cb) {
         var out = {};
         var list = keys === null || keys === undefined ? Object.keys(store) : (Array.isArray(keys) ? keys : [keys]);
-        list.forEach(function (k) { if (Object.prototype.hasOwnProperty.call(store, k)) out[k] = store[k]; });
+        // Real chrome.storage.local.get() always hands back a structured-
+        // clone COPY, never a live reference to what's actually stored —
+        // deep-cloned here (JSON round-trip is sufficient: every value
+        // this codebase ever persists is plain JSON-serializable data, the
+        // same assumption chrome.storage itself makes) so a caller that
+        // mutates its own copy of a returned object (e.g. popup.js's own
+        // mergeDetailResults(), which mutates rows in place) can never
+        // silently leak that mutation back into the store bypassing a real
+        // .set() call, exactly matching real Chrome's own behavior.
+        list.forEach(function (k) { if (Object.prototype.hasOwnProperty.call(store, k)) out[k] = JSON.parse(JSON.stringify(store[k])); });
         cb(out);
       },
       set: function (data, cb) {
@@ -165,7 +174,20 @@ async function loadPopup(opts) {
     storage: {
       local: makeArea(localStore),
       session: makeArea(sessionStore),
-      onChanged: { addListener: function () {}, removeListener: function () {} }
+      // Pure capture, never auto-fired — zero behavior change for any
+      // existing test (nothing previously read this, nothing previously
+      // fired on a real chrome.storage.local.set()). A test that needs to
+      // exercise a real onChanged listener (e.g. attachLiveSessionStorageListener,
+      // attachDetailStorageListener) invokes it directly via
+      // sandbox.fireStorageChange(areaName, changesObj) below — mirrors
+      // this project's existing content-script test convention of
+      // capturing chrome.runtime.onMessage listeners and dispatching to
+      // them directly, rather than reimplementing chrome's own event
+      // wiring.
+      onChanged: {
+        addListener: function (fn) { sandbox.__storageChangeListeners.push(fn); },
+        removeListener: function (fn) { var i = sandbox.__storageChangeListeners.indexOf(fn); if (i !== -1) sandbox.__storageChangeListeners.splice(i, 1); }
+      }
     },
     tabs: {
       query: function (queryInfo, cb) {
@@ -255,7 +277,9 @@ async function loadPopup(opts) {
       return typeof opts.confirmImpl === 'function' ? opts.confirmImpl(msg) : true;
     },
     __storage: { local: localStore, session: sessionStore },
-    __els: elCache
+    __els: elCache,
+    // Captured chrome.storage.onChanged listeners — see the mock above.
+    __storageChangeListeners: []
   };
   sandbox.window = sandbox;
   sandbox.self = sandbox;
@@ -283,6 +307,24 @@ async function loadPopup(opts) {
     el.click();
   };
   sandbox.getEl = getEl;
+
+  // Fires every captured chrome.storage.onChanged listener with a real
+  // (changes, areaName) pair — exactly chrome's own listener signature.
+  // `changesObj` is `{ keyName: newValue }`; each entry is delivered as
+  // `{ newValue: value }` (oldValue omitted — no real caller in this
+  // codebase reads it). Also applies the same change to the in-memory
+  // store so a subsequent chrome.storage.local.get() inside popup.js
+  // (e.g. mergeDetailResults' own localGet('ws_deepscrape_fields')) sees
+  // it too, matching what a real storage write+notify pair would do.
+  sandbox.fireStorageChange = function (areaName, changesObj) {
+    var store = areaName === 'session' ? sessionStore : localStore;
+    var changes = {};
+    Object.keys(changesObj).forEach(function (k) {
+      store[k] = changesObj[k];
+      changes[k] = { newValue: changesObj[k] };
+    });
+    sandbox.__storageChangeListeners.slice().forEach(function (fn) { fn(changes, areaName); });
+  };
 
   return sandbox;
 }

@@ -1043,13 +1043,101 @@
   // downgrading a page that legitimately only has 1-2 real records.
   var STALE_CONTAINER_MATCH_CEILING = 2;
 
+  // REAL AMAZON EVIDENCE mission — the OPPOSITE staleness shape, traced
+  // through real-browser diagnostics: a stale persisted containerSelector
+  // (a real Amazon report: div.a-section.a-spacing-none — a generic
+  // internal utility class) that still matches PLENTY of elements
+  // (242, far above STALE_CONTAINER_MATCH_CEILING, so the over-specific
+  // branch above never even looked at it), while a fresh, independent
+  // re-detection of the SAME live page correctly finds the true ~48-row
+  // product-card structure. The stored selector was never re-validated
+  // against the CURRENT page at RUN_EXTRACTION time for THIS failure
+  // shape — only regenaralization of an over-narrow selector was ever
+  // checked. Confirmed end-to-end via real diagnostics: this same stale
+  // selector is also what content/discovery.js persists as
+  // session.scraperConfig.containerSelector for pagination, and an
+  // over-broad selector there wrongly excludes the site's own real Next
+  // control as "inside the scraper's own container"
+  // (rejectedInsideScraperContainer=true) — fixing the selector at its
+  // SOURCE here is what makes pagination correct too, without touching
+  // content/nextdetect.js's own detection logic at all.
+  //
+  // Detection re-applies content/autodetect.js's own "row cohesion"
+  // invariant (2+ stored columns must actually co-occur together on the
+  // SAME instance for a meaningful fraction of the selector's real
+  // matches) as a RUNTIME staleness check against whatever selector
+  // happens to already be sitting in storage — which may predate that
+  // pipeline entirely (an older session/template saved before it
+  // existed), or the live page's own markup may simply have changed
+  // since. A selector with only 0-1 stored columns has nothing to
+  // co-occur with (same reasoning content/autodetect.js's own
+  // computeRowCohesion already uses) and is never second-guessed here.
+  var MIN_STORED_SELECTOR_COHESION = 0.3;
+
+  /** Evenly-spread sample (never just the first N in document order —
+   * the real record-level matches a selector was ORIGINALLY meant for
+   * are typically clustered early in the DOM, so sampling only the
+   * front would make an otherwise-broken selector look deceptively
+   * healthy; the exact same reasoning content/autodetect.js's own
+   * sampleEvenly() is built on). Returns null when there's nothing
+   * meaningful to measure (no matches, or fewer than 2 columns). */
+  function computeStoredColumnsCohesion(containerSelector, columns) {
+    var instances;
+    try { instances = document.querySelectorAll(containerSelector); } catch (e) { return null; }
+    if (!instances.length || !columns || columns.length < 2) return null;
+    var sampleSize = Math.min(instances.length, 30);
+    var sample = [];
+    for (var i = 0; i < sampleSize; i++) sample.push(instances[Math.floor(i * instances.length / sampleSize)]);
+    var completeCount = 0;
+    sample.forEach(function (inst) {
+      var present = 0;
+      columns.forEach(function (col) {
+        var el = (col.relativeSelector === ':scope') ? inst : WSSelector.queryFromScope(inst, col.relativeSelector);
+        var val = WSSelector.extractValue(el, col.attribute, inst);
+        if (val) present++;
+      });
+      if (present / columns.length >= 0.6) completeCount++;
+    });
+    return { completeRatio: completeCount / sample.length, matchCount: instances.length, sampleSize: sample.length };
+  }
+
+  /** The pre-existing single-anchor repair technique (real anchor inside
+   * ONE stale-container instance -> Sel.findRepeatingContainer ->
+   * buildContainerSelector) — unchanged in mechanism, just factored out
+   * so it can be reused as: (a) the ONLY repair path for an
+   * over-specific selector (unchanged behavior), and (b) a FALLBACK for
+   * an over-broad/low-cohesion selector when WSAutoDetect isn't
+   * available or doesn't help (see migrateContainerSelectorIfStale's
+   * own comment on why that case now prefers a stronger signal first). */
+  function tryAnchorBasedRepair(state) {
+    var containers = document.querySelectorAll(state.containerSelector);
+    var anchorEl = null;
+    for (var i = 0; i < containers.length && !anchorEl; i++) {
+      for (var c = 0; c < state.columns.length && !anchorEl; c++) {
+        var col = state.columns[c];
+        if (!col.relativeSelector || col.relativeSelector === ':scope') continue;
+        var fieldEl = WSSelector.queryFromScope(containers[i], col.relativeSelector);
+        if (fieldEl) anchorEl = fieldEl;
+      }
+    }
+    if (!anchorEl) return null; // no resolvable field inside the stale container — can't safely re-anchor
+    var detected = WSSelector.findRepeatingContainer(anchorEl);
+    if (!detected.container) return null;
+    var migrated = WSSelector.buildContainerSelector(detected.container, undefined, detected.siblings);
+    if (!migrated || migrated === state.containerSelector) return null;
+    return { containerSelector: migrated, matchCountAfter: WSSelector.countMatches(migrated), siblingCount: detected.siblings ? detected.siblings.length : 0 };
+  }
+
   function migrateContainerSelectorIfStale(state) {
     var diag = {
       storedContainerSelector: state.containerSelector || null,
       matchCountBefore: null,
       migratedContainerSelector: null,
       matchCountAfter: null,
-      templateMigrationPerformed: false
+      templateMigrationPerformed: false,
+      storedSelectorCohesion: null,
+      migratedSelectorCohesion: null,
+      usedAutoDetectRepair: false
     };
     if (!state.containerSelector || !Array.isArray(state.columns) || !state.columns.length) return diag;
 
@@ -1062,32 +1150,121 @@
     diag.matchCountBefore = matchCountBefore;
     // 0 matches means the stored selector is broken in a different way
     // (the page changed shape entirely) — there's no live anchor to
-    // re-derive from, so this migration path (which only ever
-    // REGENERALIZES an over-specific selector) correctly leaves it
-    // alone rather than guessing.
-    if (matchCountBefore < 1 || matchCountBefore > STALE_CONTAINER_MATCH_CEILING) return diag;
+    // re-derive from, so this migration path (which only ever repairs a
+    // still-partially-working selector) correctly leaves it alone
+    // rather than guessing.
+    if (matchCountBefore < 1) return diag;
 
-    var containers = document.querySelectorAll(state.containerSelector);
-    var anchorEl = null;
-    for (var i = 0; i < containers.length && !anchorEl; i++) {
-      for (var c = 0; c < state.columns.length && !anchorEl; c++) {
-        var col = state.columns[c];
-        if (!col.relativeSelector || col.relativeSelector === ':scope') continue;
-        var fieldEl = WSSelector.queryFromScope(containers[i], col.relativeSelector);
-        if (fieldEl) anchorEl = fieldEl;
+    var isOverSpecific = matchCountBefore <= STALE_CONTAINER_MATCH_CEILING;
+    var cohesion = isOverSpecific ? null : computeStoredColumnsCohesion(state.containerSelector, state.columns);
+    diag.storedSelectorCohesion = cohesion;
+    var isOverBroadLowCohesion = !!(cohesion && cohesion.completeRatio < MIN_STORED_SELECTOR_COHESION);
+    if (!isOverSpecific && !isOverBroadLowCohesion) return diag; // a genuinely healthy selector — never second-guessed
+
+    if (isOverSpecific) {
+      // Existing rule, unchanged: single-anchor repair, only accept if
+      // strictly MORE matches (regeneralizing an over-narrow selector).
+      var repaired = tryAnchorBasedRepair(state);
+      if (repaired) {
+        diag.migratedContainerSelector = repaired.containerSelector;
+        diag.matchCountAfter = repaired.matchCountAfter;
+        if (repaired.matchCountAfter > matchCountBefore) {
+          state.containerSelector = repaired.containerSelector;
+          diag.templateMigrationPerformed = true;
+        }
       }
+      return diag;
     }
-    if (!anchorEl) return diag; // no resolvable field inside the stale container — can't safely re-anchor
 
-    var detected = WSSelector.findRepeatingContainer(anchorEl);
-    if (!detected.container) return diag;
-    var migrated = WSSelector.buildContainerSelector(detected.container, undefined, detected.siblings);
-    var matchCountAfter = WSSelector.countMatches(migrated);
-    diag.migratedContainerSelector = migrated;
-    diag.matchCountAfter = matchCountAfter;
+    // REAL AMAZON EVIDENCE mission (this round) — real, proven gap: the
+    // single-anchor findRepeatingContainer climb above can itself stop
+    // at ANOTHER internal fragment level (not the true record boundary)
+    // when that inner level already happens to look "complete enough"
+    // (findRepeatingContainer's own deliberate "stop once complete"
+    // heuristic in content/selector.js — correct for its original
+    // purpose, just not a strong enough signal for THIS repair on a
+    // real page where multiple nested fragment levels all share the
+    // same generic class). content/autodetect.js's own runAutoDetect()
+    // is a strictly more powerful, already-independently-validated
+    // signal for "what does a real repeating record on this page
+    // actually look like" — it already enforces the hard row-cohesion
+    // invariant (a candidate whose own fields don't co-occur together
+    // is IMPOSSIBLE for it to select) and field-anchored candidate
+    // generation, and real-page evidence already proved it correctly
+    // finds the true product-row structure here. When available, it is
+    // preferred; the single-anchor climb remains as a fallback only for
+    // a page where WSAutoDetect genuinely isn't loaded or finds nothing
+    // usable — never removed, never weakened.
+    var autoDetectWinner = null;
+    if (typeof WSAutoDetect !== 'undefined' && typeof WSAutoDetect.runAutoDetect === 'function') {
+      var adResult;
+      try { adResult = WSAutoDetect.runAutoDetect(); } catch (e) { adResult = null; }
+      autoDetectWinner = (adResult && adResult.ok && adResult.structures && adResult.structures[0]) || null;
+    }
+    if (autoDetectWinner && autoDetectWinner.containerSelector && autoDetectWinner.containerSelector !== state.containerSelector) {
+      // REAL PRODUCTION REGRESSION (found via real-Chrome verification of
+      // this exact repair mechanism, previous round): silently replacing
+      // state.columns with Auto Detect's own guessed field list here
+      // overwrote a user's MANUALLY-selected columns with an unrelated
+      // 10-field Auto Detect schema the user never asked for and never
+      // confirmed — the exact "mixed-column-schema" corruption a real
+      // report proved (page 1's row used the new 10-column schema,
+      // every later page kept using the user's own 2 manually-chosen
+      // column IDs, because only THIS in-memory `state` object — used
+      // for page 1's own extraction and then persisted back to storage
+      // — ever saw the swap; popup.js's own separate in-memory `state`,
+      // which session.scraperConfig for every LATER page is built from,
+      // never did).
+      //
+      // Fix: ONLY the containerSelector is ever replaced here — the
+      // user's own column DEFINITIONS (id/name/attribute/relativeSelector)
+      // are never touched. This is safe because
+      // Sel.queryFromScope()/querySelector() perform a DESCENDANT
+      // search, not a direct-child-only one: a class-based
+      // relativeSelector built to work from a narrow internal-fragment
+      // scope (e.g. "span.a-color-base") generally ALSO resolves
+      // correctly from a broader, more correct ANCESTOR scope (the true
+      // record-level container) — the intermediate nesting depth
+      // between the two doesn't change what a descendant selector
+      // matches. The repair is verified, not assumed: the user's own
+      // EXISTING columns must show measurably better cohesion against
+      // the NEW container than they did against the OLD one, or this
+      // migration is rejected outright and the original selector is
+      // left in place — never a silent, unverified swap.
+      var cohesionWithExistingColumns = computeStoredColumnsCohesion(autoDetectWinner.containerSelector, state.columns);
+      diag.migratedContainerSelector = autoDetectWinner.containerSelector;
+      diag.matchCountAfter = autoDetectWinner.itemCount;
+      diag.migratedSelectorCohesion = cohesionWithExistingColumns;
+      var existingColumnsStillResolve = state.columns.length < 2
+        // A single-column config has no "cohesion" to measure (same
+        // reasoning as computeStoredColumnsCohesion's own >=2 guard) —
+        // fall back to requiring the new container's own real match
+        // count to be plausible instead.
+        ? autoDetectWinner.itemCount > 0
+        : !!(cohesionWithExistingColumns && cohesionWithExistingColumns.completeRatio >= MIN_STORED_SELECTOR_COHESION);
+      if (existingColumnsStillResolve) {
+        diag.usedAutoDetectRepair = true;
+        state.containerSelector = autoDetectWinner.containerSelector;
+        diag.templateMigrationPerformed = true;
+        return diag;
+      }
+      // The user's own columns don't resolve well against Auto Detect's
+      // own candidate either — never guess further; fall through to the
+      // single-anchor fallback below, which may still find something
+      // usable, or ultimately leave the original selector untouched.
+    }
 
-    if (migrated && migrated !== state.containerSelector && matchCountAfter > matchCountBefore) {
-      state.containerSelector = migrated;
+    // Fallback: the single-anchor climb, same acceptance rule as before
+    // this round (measurably better cohesion, no scope drift of its own).
+    var fallbackRepaired = tryAnchorBasedRepair(state);
+    if (!fallbackRepaired) return diag;
+    diag.migratedContainerSelector = fallbackRepaired.containerSelector;
+    diag.matchCountAfter = fallbackRepaired.matchCountAfter;
+    var migratedCohesion = computeStoredColumnsCohesion(fallbackRepaired.containerSelector, state.columns);
+    diag.migratedSelectorCohesion = migratedCohesion;
+    var driftOk = fallbackRepaired.siblingCount > 0 && fallbackRepaired.matchCountAfter <= fallbackRepaired.siblingCount * 3;
+    if (driftOk && migratedCohesion && migratedCohesion.completeRatio > cohesion.completeRatio) {
+      state.containerSelector = fallbackRepaired.containerSelector;
       diag.templateMigrationPerformed = true;
     }
     return diag;
@@ -1166,4 +1343,14 @@
       return true;
     }
   });
+
+  // REAL AMAZON EVIDENCE mission — exposes migrateContainerSelectorIfStale()
+  // (already the canonical, sole implementation of "is this persisted
+  // containerSelector still trustworthy, and if not, what should it be
+  // instead") so content/discovery.js can call the EXACT SAME function
+  // at discovery-session-start time (bootstrap-resume included) instead
+  // of maintaining a second, divergence-prone copy. window.WSContent
+  // did not exist before this — a pure addition, no existing behavior
+  // in this file changes.
+  window.WSContent = { migrateContainerSelectorIfStale: migrateContainerSelectorIfStale };
 })();

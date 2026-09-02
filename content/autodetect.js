@@ -159,6 +159,274 @@
     return groups;
   }
 
+  // ROW/CONTAINER OVER-COUNTING FIX (real Amazon production report — see
+  // consolidateFragmentedGroups below for the full mechanism): the same
+  // tag+stable-class signature recurring under this many DIFFERENT
+  // parents is the generic signature of "an internal layout row reused
+  // several times INSIDE each outer record" (a shared design-system
+  // utility class, e.g. Amazon's own "a-section", repeated as siblings
+  // inside every product card), never a coincidence worth treating as
+  // dozens of independent candidates. A signature seen under FEWER than
+  // this many distinct parents is left completely untouched — the
+  // common, already-correct case (a genuine repeating structure has its
+  // instances as siblings under exactly ONE shared parent, so it was
+  // never fragmented in the first place).
+  var MIN_DISTINCT_PARENTS_FOR_CONSOLIDATION = 4;
+
+  function groupSignature(g) {
+    var repEl = g.elements[0];
+    return g.tag + '|' + Sel.getStableClasses(repEl).slice().sort().join('.');
+  }
+
+  /**
+   * ROW/CONTAINER OVER-COUNTING FIX — real production report: a real
+   * Amazon search run (https://www.amazon.com/s?k=desk+lamp) reported
+   * 167 unique rows from ~48 visible product cards on page 1 alone.
+   *
+   * ROOT CAUSE: scanRootForGroups groups elements PER PARENT NODE — so a
+   * shared layout/utility class reused several times as direct siblings
+   * INSIDE every product card (e.g. Amazon's own generic "a-section",
+   * used for a card's title row, price row, rating row, etc.) produces
+   * ONE SEPARATE small candidate group PER CARD (48 cards -> up to 48
+   * near-identical ~3-4-element candidate groups), instead of being
+   * recognized as one page-wide pattern. dedupeCandidates (below) only
+   * ever collapses candidates related by DOM containment with a NEARLY
+   * EQUAL item count (a real `<div>` vs. its own `<a>` child, count
+   * difference <= 2) — a "48 separate ~4-count groups, one per card"
+   * situation never triggers that check at all, since none of those 48
+   * groups contains another (they live under 48 DIFFERENT parents).
+   * Each one competes independently for a slot in the top-MAX_CANDIDATES
+   * ranking, crowding out the real, correct "48 product cards" candidate
+   * (itself just ONE clean group, since the cards themselves ARE
+   * siblings under one shared parent — the results grid). Whichever one
+   * of these near-identical per-card fragments happens to win then has
+   * its own containerSelector built from a class that, at REAL
+   * extraction time, matches every such row on EVERY card page-wide
+   * (~167) — one product card producing several rows instead of one.
+   *
+   * FIX: consolidate every same-signature group recurring under
+   * MIN_DISTINCT_PARENTS_FOR_CONSOLIDATION+ different parents into ONE
+   * candidate (its real, honest page-wide membership) BEFORE scoring —
+   * so it competes exactly ONCE, at its own true achievable score, never
+   * dozens of times. A genuine per-card fragment (typically containing
+   * only PART of a record's link/image/price, never all three together)
+   * scores meaningfully lower under this file's own existing link/image/
+   * price signal weighting than the real per-card container (which
+   * DOES carry all three together) — so the correct candidate wins on
+   * its own merits, through the exact same scoring this file already
+   * uses for every other decision, once it's no longer drowned out.
+   *
+   * Generic by construction — never keyed to any hostname, class name,
+   * or site-specific shape; the SAME "internal layout row repeated many
+   * times per outer record" pattern this fixes is common to any site
+   * built on a component/utility-class design system, not an
+   * Amazon-only quirk. A signature that only ever recurs under a
+   * handful of parents (the normal case for a genuinely correct,
+   * already-singular repeating structure) is left completely
+   * untouched — zero behavior change for Etsy/eBay/every other
+   * previously-verified site.
+   */
+  function consolidateFragmentedGroups(groups) {
+    var bySig = {};
+    var order = [];
+    groups.forEach(function (g) {
+      var sig = groupSignature(g);
+      if (!bySig[sig]) { bySig[sig] = []; order.push(sig); }
+      bySig[sig].push(g);
+    });
+    var result = [];
+    order.forEach(function (sig) {
+      var entries = bySig[sig];
+      if (entries.length === 1) { result.push(entries[0]); return; }
+      var distinctParents = [];
+      entries.forEach(function (g) { if (distinctParents.indexOf(g.parent) === -1) distinctParents.push(g.parent); });
+      if (distinctParents.length < MIN_DISTINCT_PARENTS_FOR_CONSOLIDATION) {
+        entries.forEach(function (g) { result.push(g); });
+        return;
+      }
+      var allElements = [];
+      entries.forEach(function (g) { allElements = allElements.concat(g.elements); });
+      result.push({ parent: null, elements: allElements, tag: entries[0].tag, consolidatedFromGroupCount: entries.length, consolidatedFromParentCount: distinctParents.length });
+    });
+    return result;
+  }
+
+  // REAL AMAZON EVIDENCE mission (TASK 3 — "anchor to common ancestor
+  // structure"): scanRootForGroups/consolidateFragmentedGroups above find
+  // candidates purely by CLASS-SHARING (elements grouped because they
+  // share a stable class). That works well when the true repeating
+  // record itself carries a clean, page-wide-unique class — but the real
+  // persisted diagnostic proved a case where it doesn't: Amazon's own
+  // product-card wrapper apparently has no such class of its own, while
+  // an internal utility class shared with sidebar/spec content
+  // ("a-section a-spacing-none") was the ONLY thing consistently shared
+  // page-wide, so it was the only clean class-based candidate ever
+  // generated. This adds a SECOND, structurally-independent discovery
+  // method: starting from a heading-like element (a strong "this is
+  // probably a title field, not a whole record" signal — the SAME
+  // consideration a human relies on when clicking a title in Manual
+  // Mode), climb via Sel.findRepeatingContainer — the exact same,
+  // already-proven sibling-climbing algorithm Manual Mode's own
+  // click-to-select flow uses on real sites today — to the nearest
+  // ancestor level that (a) repeats across siblings under one shared
+  // parent and (b) already looks like a complete record
+  // (countMeaningfulDescendants' "stop once complete" rule, built into
+  // findRepeatingContainer itself, so this never over-climbs past the
+  // true card boundary). The result is added as one MORE ordinary raw
+  // candidate group — it still has to earn its place through the exact
+  // same scoring/cohesion/dedup pipeline as every other candidate; this
+  // only widens WHERE candidates can come from, never what wins.
+  var MAX_ANCHOR_CANDIDATES_EXAMINED = 40;
+
+  function addAnchoredCandidates(groups) {
+    var added = [];
+    var examined = 0;
+    for (var i = 0; i < groups.length && examined < MAX_ANCHOR_CANDIDATES_EXAMINED; i++) {
+      var repEl = groups[i].elements && groups[i].elements[0];
+      if (!repEl || !repEl.querySelector) continue;
+      var heading = /^H[1-6]$/.test(repEl.tagName) ? repEl : repEl.querySelector('h1,h2,h3,h4,h5,h6');
+      if (!heading) continue;
+      examined++;
+      var climbed;
+      try { climbed = Sel.findRepeatingContainer(heading); } catch (e) { continue; }
+      if (!climbed || !climbed.container || climbed.siblingCount < 2) continue;
+      if (climbed.container === repEl) continue; // already the same level scanRootForGroups found
+      added.push({ parent: climbed.container.parentNode, elements: climbed.siblings, tag: climbed.container.tagName, anchoredFromHeading: true });
+    }
+    return added;
+  }
+
+  // =====================================================================
+  // REAL AMAZON EVIDENCE mission — ROUND 3 REBUILD (PART A): field-
+  // anchored common-ancestor candidate generation. This is now the
+  // PRIMARY, preferred way multi-field candidates are discovered when
+  // the signals exist on the page — not another score adjustment layered
+  // on top of the class-sharing scan, an independent, structurally-
+  // guaranteed source of candidates. scanRootForGroups (class-sharing)
+  // and addAnchoredCandidates (single-heading climb, previous round)
+  // both remain — they are what still covers a single-field listing (a
+  // table of contents, a plain link list) where there is no second
+  // signal to anchor against; the HARD co-occurrence gate in
+  // runAutoDetect() below applies uniformly to every candidate regardless
+  // of which of these three methods produced it, so a class-shared
+  // internal-fragment candidate can never be chosen once 2+ fields are
+  // requested and it fails to actually carry them together.
+  // =====================================================================
+
+  var MAX_FIELD_ANCHOR_TITLES_EXAMINED = 80;
+  var MAX_FIELD_ANCHOR_PRICE_LEAVES = 400;
+  var MAX_FIELD_ANCHOR_CLIMB_DEPTH = 12;
+
+  /** Every leaf element (no element children of its own) page-wide whose
+   * OWN text matches PRICE_RE — the same signal computeCandidateSignals
+   * already uses for priceLikeRatio, just collected as individual
+   * elements instead of an aggregate ratio. Bounded so a pathological
+   * page (thousands of numeric-looking leaves) can't blow the budget. */
+  function collectPriceLikeLeaves(budget) {
+    var out = [];
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, null);
+    var node = walker.nextNode();
+    while (node && out.length < budget) {
+      if (!node.children || !node.children.length) {
+        var text = normText(node.textContent);
+        if (text && PRICE_RE.test(text)) out.push(node);
+      }
+      node = walker.nextNode();
+    }
+    return out;
+  }
+
+  /** Every heading element page-wide with real text — the same "title
+   * candidate" shape addAnchoredCandidates already uses for its own
+   * single-signal climb. */
+  function collectTitleLikeHeadings(budget) {
+    var out = [];
+    var headings = document.body.querySelectorAll('h1,h2,h3,h4,h5,h6');
+    for (var i = 0; i < headings.length && out.length < budget; i++) {
+      if (normText(headings[i].textContent)) out.push(headings[i]);
+    }
+    return out;
+  }
+
+  /** Climbs from one title element's ancestor chain (bounded depth) to
+   * the LOWEST ancestor whose subtree also encloses at least one
+   * price-like leaf — the generic, structural "this ancestor already
+   * contains both a title and a price together, so it's plausibly ONE
+   * complete record" boundary. Returns null when no such ancestor exists
+   * within the depth budget (a real, correct outcome for a page with
+   * titles but genuinely no nearby prices — an article list, a table of
+   * contents — where this method should decline rather than guess). */
+  function findRecordBoundary(titleEl, priceLeaves) {
+    var node = titleEl;
+    var depth = 0;
+    while (node && node !== document.body && depth < MAX_FIELD_ANCHOR_CLIMB_DEPTH) {
+      for (var i = 0; i < priceLeaves.length; i++) {
+        if (node !== priceLeaves[i] && node.contains && node.contains(priceLeaves[i])) return node;
+      }
+      node = node.parentElement;
+      depth++;
+    }
+    return null;
+  }
+
+  /**
+   * PART A — field-anchored common-ancestor candidate generation (the
+   * REBUILD this mission's evidence specifically asked for, replacing
+   * "another score penalty against the existing broad selector" with a
+   * decision rule that GUARANTEES co-occurrence by construction). Finds
+   * every title-like heading page-wide, and for each one climbs to the
+   * lowest ancestor that ALSO encloses a price-like value —
+   * structurally guaranteeing this candidate's typical instance contains
+   * both signals together, never relying on scoring to reward that after
+   * the fact. Boundary elements are grouped by structural signature (tag
+   * + stable classes) so many titles resolving to the SAME repeating
+   * card shape become ONE candidate, not one per title — "items look
+   * structurally similar" is enforced by this grouping itself, exactly
+   * as consolidateFragmentedGroups already does for the class-sharing
+   * scan. A signature reached by only ONE title still gets one more
+   * chance via Sel.findRepeatingContainer's own sibling-climb (handles a
+   * classless boundary element).
+   *
+   * Returns [] outright when no price-like signal exists anywhere on the
+   * page — deliberately leaves single-field pages entirely to
+   * scanRootForGroups/addAnchoredCandidates rather than forcing a
+   * meaningless "anchor" search.
+   */
+  function findFieldAnchoredCandidates() {
+    var priceLeaves = collectPriceLikeLeaves(MAX_FIELD_ANCHOR_PRICE_LEAVES);
+    if (!priceLeaves.length) return [];
+    var titles = collectTitleLikeHeadings(MAX_FIELD_ANCHOR_TITLES_EXAMINED);
+    var boundaries = [];
+    titles.forEach(function (t) {
+      var b = findRecordBoundary(t, priceLeaves);
+      if (b && boundaries.indexOf(b) === -1) boundaries.push(b);
+    });
+    if (boundaries.length < 2) return [];
+
+    var bySig = {};
+    var order = [];
+    boundaries.forEach(function (b) {
+      var sig = b.tagName + '|' + Sel.getStableClasses(b).slice().sort().join('.');
+      if (!bySig[sig]) { bySig[sig] = []; order.push(sig); }
+      bySig[sig].push(b);
+    });
+
+    var candidates = [];
+    order.forEach(function (sig) {
+      var els = bySig[sig];
+      if (els.length >= 2) {
+        candidates.push({ parent: els[0].parentNode, elements: els, tag: els[0].tagName, fieldAnchored: true });
+        return;
+      }
+      var climbed;
+      try { climbed = Sel.findRepeatingContainer(els[0]); } catch (e) { climbed = null; }
+      if (climbed && climbed.container && climbed.siblingCount >= 2) {
+        candidates.push({ parent: climbed.container.parentNode, elements: climbed.siblings, tag: climbed.container.tagName, fieldAnchored: true });
+      }
+    });
+    return candidates;
+  }
+
   /** Also looks inside every OPEN shadow root found in the light-DOM scan
    * (never closed ones), one level of shadow nesting deep — matches the
    * most common real pattern (repeating custom elements in light DOM,
@@ -179,12 +447,35 @@
       }
     }
 
+    var rawGroupCount = groups.length;
+    groups = consolidateFragmentedGroups(groups);
+    var anchored = addAnchoredCandidates(groups);
+    groups = groups.concat(anchored);
+    var fieldAnchored = findFieldAnchoredCandidates();
+    groups = groups.concat(fieldAnchored);
+
     // scannedCount is purely ADDITIVE (V1 AUTO DETECTION DIAGNOSTICS) — no
     // existing caller reads it, so this changes nothing for production
     // AUTO detection; it exists only so the dev-only diagnostic can
     // report exactly how many of the page's elements were actually
     // examined vs. MAX_SCAN_ELEMENTS.
-    return { groups: groups, truncated: budget.remaining <= 0, scannedCount: MAX_SCAN_ELEMENTS - budget.remaining };
+    return {
+      groups: groups, truncated: budget.remaining <= 0, scannedCount: MAX_SCAN_ELEMENTS - budget.remaining,
+      // ROW/CONTAINER OVER-COUNTING FIX diagnostics (mission's own
+      // explicit requirement): how many raw per-parent groups existed
+      // before consolidation, vs. after — the delta is exactly how many
+      // groups were folded together as "internal fragments of a single
+      // outer record" rather than treated as independent candidates.
+      rawGroupCountBeforeConsolidation: rawGroupCount,
+      groupCountAfterConsolidation: groups.length,
+      // REAL AMAZON EVIDENCE mission diagnostics (TASK 3): how many
+      // extra candidates were discovered via the heading-anchored climb
+      // rather than class-sharing.
+      anchoredCandidateCount: anchored.length,
+      // PART A diagnostics: how many extra candidates were discovered via
+      // the NEW field-anchored (title+price common-ancestor) method.
+      fieldAnchoredCandidateCount: fieldAnchored.length
+    };
   }
 
   // =====================================================================
@@ -272,11 +563,39 @@
    * penalty, etc. — instead of a second, separately-written
    * approximation that could quietly drift out of sync with the real
    * scoring logic over time. */
+  /**
+   * REAL AMAZON EVIDENCE mission (persisted diagnostics from a failed
+   * real run — containerSelector "div.a-section.a-spacing-none", raw=242
+   * page-wide matches for ~48 real product cards): computeCandidateSignals
+   * used to always sample the FIRST `sampleSize` elements of a candidate
+   * (elements.slice(0, sampleSize)) — for a candidate whose true
+   * page-wide population is large and heterogeneous (a generic utility
+   * class also reused in a sidebar/spec/filter area far from the product
+   * grid), whichever handful of instances happen to occur FIRST in scan
+   * order dominates every signal, even when they're not representative
+   * of the population as a whole. Evenly-spaced sampling across the FULL
+   * element list is a strict generalization: for any candidate with
+   * n <= sampleSize (every existing small fixture/real site already
+   * verified) this returns byte-for-byte the same elements as
+   * elements.slice(0, sampleSize) — zero behavior change. It only
+   * changes behavior once n exceeds the sample size, which is exactly
+   * the large/heterogeneous-candidate case this fix targets.
+   */
+  function sampleEvenly(elements, sampleSize) {
+    var n = elements.length;
+    if (n <= sampleSize) return elements.slice();
+    var out = [];
+    for (var i = 0; i < sampleSize; i++) {
+      out.push(elements[Math.floor(i * n / sampleSize)]);
+    }
+    return out;
+  }
+
   function computeCandidateSignals(candidate) {
     var elements = candidate.elements;
     var n = elements.length;
     var sampleSize = Math.min(n, 12);
-    var sample = elements.slice(0, sampleSize);
+    var sample = sampleEvenly(elements, sampleSize);
 
     var textLens = sample.map(function (el) { return normText(el.textContent).length; });
     var avgTextLen = textLens.reduce(function (a, b) { return a + b; }, 0) / sampleSize;
@@ -355,13 +674,46 @@
     var strongProductSignature = hasLinkRatio >= 0.8 && hasImageRatio >= 0.8 && priceLikeRatio >= 0.8 && n >= 10;
     if (strongProductSignature) score += 20;
 
+    // REAL AMAZON EVIDENCE mission — real persisted diagnostic from a
+    // failed run: containerSelector "div.a-section.a-spacing-none" won
+    // with raw=242 page-wide matches against ~48 real product cards
+    // (~5 matches per card). consolidateFragmentedGroups() (above) already
+    // records, for every candidate it folds together, how many DISTINCT
+    // PARENTS its elements actually came from (consolidatedFromParentCount)
+    // — that number was computed but never fed back into scoring, so a
+    // consolidated candidate competed purely on its content signals, with
+    // no penalty for the one structural fact that actually distinguishes
+    // "one row per record" from "several fragments per record": a genuine
+    // repeating ITEM container has close to ONE element per distinct
+    // parent (the real cards ARE the direct children of one shared grid —
+    // each parent contributes exactly one candidate element), while an
+    // internal layout primitive reused several times INSIDE every card
+    // (a title row, a price row, a rating row, ... all sharing one
+    // generic utility class) contributes SEVERAL candidate elements per
+    // distinct parent. This is the same "row/card-level structure across
+    // siblings" invariant the mission itself names, made mechanical and
+    // graded — a candidate averaging meaningfully more than one element
+    // per parent is charged in direct proportion to how fragment-shaped
+    // it is. A ratio of exactly 1 (or a candidate that was never
+    // consolidated at all — the normal, already-correct case for every
+    // previously-verified site) gets zero penalty; nothing here is keyed
+    // to any hostname, class name, or item count.
+    var elementsPerParent = null;
+    var fragmentationPenalty = 0;
+    if (typeof candidate.consolidatedFromParentCount === 'number' && candidate.consolidatedFromParentCount > 0) {
+      elementsPerParent = n / candidate.consolidatedFromParentCount;
+      fragmentationPenalty = Math.min(50, Math.max(0, elementsPerParent - 1) * 14);
+      score -= fragmentationPenalty;
+    }
+
     return {
       score: Math.max(0, Math.min(100, Math.round(score))),
       itemCount: n, avgTextLen: avgTextLen, hasLinkRatio: hasLinkRatio, hasImageRatio: hasImageRatio,
       priceLikeRatio: priceLikeRatio, titleLikeRatio: titleLikeRatio, linkDiversityRatio: linkDiversityRatio,
       consistency: consistency, navPenalty: navPenalty, navMatchKind: navMatch, mainBonus: mainBonus,
       nearEmptyPenalty: nearEmptyPenalty, looksLikeAttributeList: looksLikeAttributeList,
-      strongProductSignature: strongProductSignature
+      strongProductSignature: strongProductSignature,
+      elementsPerParent: elementsPerParent, fragmentationPenalty: Math.round(fragmentationPenalty)
     };
   }
 
@@ -479,7 +831,22 @@
 
   // ---- naming heuristics (spec #7) ----
 
-  var PRICE_RE = /(?:[$€£₺¥₹]\s?\d[\d.,]*\d|\d[\d.,]*\d\s?[$€£₺¥₹])/;
+  // REAL AMAZON EVIDENCE mission (ROOT CAUSE A) — real persisted data
+  // contained genuine price values written as "TRY 1,640.85" (an ISO
+  // 4217 currency CODE, not a symbol) that this pattern never matched at
+  // all. A three-letter currency code immediately before/after a number
+  // is a real, standard, WORLDWIDE convention (not Amazon-specific) —
+  // a short, well-known allow-list (never "any 3 letters", which would
+  // false-positive on ordinary words/abbreviations) closes this gap the
+  // same way the symbol-based half already worked.
+  var CURRENCY_CODE_RE_SRC = '(?:USD|EUR|GBP|TRY|JPY|CNY|INR|RUB|AUD|CAD|CHF|SEK|NOK|DKK|PLN|BRL|MXN|ZAR|AED|SAR|KRW|SGD|HKD|NZD)';
+  var PRICE_RE = new RegExp(
+    '(?:[$€£₺¥₹]\\s?\\d[\\d.,]*\\d' +
+    '|\\d[\\d.,]*\\d\\s?[$€£₺¥₹]' +
+    '|\\b' + CURRENCY_CODE_RE_SRC + '\\s?\\d[\\d.,]*\\d' +
+    '|\\d[\\d.,]*\\d\\s?' + CURRENCY_CODE_RE_SRC + '\\b)',
+    'i'
+  );
   var RATING_RE = /^\s*\d(?:[.,]\d)?\s*(?:\/\s*5|\/\s*10|★|stars?)?\s*$/i;
   var DATETIME_RE = /\b(\d+\s?(?:min|hour|hr|day|week|month|year)s?\s?ago|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4})\b/i;
   var AUTHOR_RE = /^(?:u\/|@)[\w.\-]+$/;
@@ -639,11 +1006,12 @@
     return best;
   }
 
-  function buildFieldCandidate(containerScope, leafEl, allInstances) {
-    var relSelector = Sel.buildRelativeSelector(containerScope, leafEl);
-    if (!relSelector) return null;
-
-    var attribute = Sel.suggestAttribute(leafEl);
+  /** Resolves `relSelector`/`attribute` against a sample of `allInstances`
+   * and computes coverage/uniqueness/sample values — the sampling core
+   * buildFieldCandidate() always needed, now factored out so it can be
+   * re-run against an ESCALATED (more specific) selector without
+   * duplicating the loop (REAL AMAZON EVIDENCE mission ROOT CAUSE A). */
+  function sampleFieldValues(containerScope, relSelector, attribute, allInstances) {
     var sampleN = Math.min(allInstances.length, COVERAGE_SAMPLE_SIZE);
     var nonEmpty = 0;
     var samples = [];
@@ -672,14 +1040,135 @@
     // Meaningless (always 1.0) for a sample of exactly one row — only a
     // real signal once there's more than one row to actually vary across.
     var uniqueness = nonEmpty > 1 ? distinctCount / nonEmpty : 1;
+    return { coverage: coverage, samples: samples, uniqueness: uniqueness, nonEmpty: nonEmpty };
+  }
+
+  /**
+   * REAL AMAZON EVIDENCE mission — ROOT CAUSE A: the real persisted
+   * config's own Price relativeSelector was "span.a-color-base" —
+   * Amazon's own generic text-color utility class, reused for ratings,
+   * badges, filter labels, and unrelated UI text, never price-specific
+   * at all. Sel.buildRelativeSelector (content/selector.js, UNTOUCHED
+   * by this fix — Manual Mode uses it too, where the user has already
+   * visually confirmed their own click) only ever asks "does this
+   * selector uniquely resolve to my target WITHIN this one container
+   * instance?" — it has no concept of how generic that selector is
+   * PAGE-WIDE, because for a single human-confirmed click that concept
+   * doesn't matter. Auto Detect is the one blindly proposing selectors
+   * across many candidates with no human confirming each one — this is
+   * where a semantic-precision guardrail belongs.
+   *
+   * For a field whose own detected samples predominantly look price-like
+   * (PRICE_RE — see its own comment for why "TRY 1,640.85"-style
+   * currency-CODE prices, not just symbol-prefixed ones, are recognized
+   * too, a real worldwide convention, never Amazon-specific), measures
+   * how many elements that SAME selector matches page-wide, and what
+   * fraction of THOSE global matches ALSO look price-like. A selector
+   * that is both (a) far broader than this candidate's own expected item
+   * count and (b) mostly NOT price-like when queried globally is a
+   * confirmed "poisoned" selector — exactly Amazon's own
+   * "TRY 1,640.85"/"4.7"/"Small Business"/"#1 Top Rated" all sharing one
+   * generic class.
+   */
+  function measureGlobalSelectorPrecision(relativeSelector, expectedItemCount) {
+    if (typeof relativeSelector !== 'string' || relativeSelector === ':scope') return null;
+    var globalMatches;
+    try { globalMatches = document.querySelectorAll(relativeSelector); } catch (e) { return null; }
+    var totalMatches = globalMatches.length;
+    if (totalMatches === 0) return null;
+    // Evenly-spread sampling (sampleEvenly — see its own comment), never
+    // just the first N in document order: the real record-level matches
+    // (this selector's own INTENDED targets) are typically clustered
+    // early in the DOM (the results grid usually comes before a sidebar/
+    // footer/related-content section), so sampling only the front would
+    // make an otherwise-imprecise selector look deceptively clean.
+    var sample = sampleEvenly(Array.prototype.slice.call(globalMatches), Math.min(totalMatches, 60));
+    var priceLikeCount = 0;
+    for (var i = 0; i < sample.length; i++) {
+      if (PRICE_RE.test(normText(sample[i].textContent))) priceLikeCount++;
+    }
+    return {
+      totalMatches: totalMatches, sampledCount: sample.length, priceLikeRatio: priceLikeCount / sample.length,
+      tooManyMatches: expectedItemCount > 0 && totalMatches > expectedItemCount * 3
+    };
+  }
+
+  /** MISSION A — "search for a more specific selector": escalates to a
+   * parent-scoped compound (the field-level analogue of
+   * buildContainerSelector's own "parent-scoped" tier) by asking
+   * Sel.buildRelativeSelector (untouched, existing, proven code) for a
+   * selector to the leaf's OWN PARENT, then appending the leaf's own
+   * local tag+stable-class segment as a direct-child combinator. This
+   * remains correctly scoped when queried via Sel.queryFromScope(inst,
+   * ...) because the parent-selector half was itself already built
+   * relative to containerScope — the combinator only needs to match
+   * within whatever containerScope's own querySelector call already
+   * bounds. Returns null (caller then drops the field entirely rather
+   * than ship a poisoned selector) when no parent selector is available,
+   * the leaf has no stable class of its own to combine with, or the
+   * escalated selector still fails to resolve correctly. */
+  function tryEscalateFieldSelector(containerScope, leafEl) {
+    var parentEl = leafEl.parentElement;
+    if (!parentEl || parentEl === containerScope) return null;
+    var parentSel = Sel.buildRelativeSelector(containerScope, parentEl);
+    if (typeof parentSel !== 'string') return null;
+    var leafClasses = Sel.getStableClasses(leafEl);
+    if (!leafClasses.length) return null;
+    var leafLocal = leafEl.tagName.toLowerCase() + leafClasses.map(function (c) { return '.' + c; }).join('');
+    var escalated = (parentSel === ':scope' ? '' : parentSel + ' ') + '> ' + leafLocal;
+    // Verify it actually resolves back to the SAME element it's meant to
+    // — never ship an escalated selector that silently points elsewhere.
+    var resolved = Sel.queryFromScope(containerScope, escalated);
+    if (resolved !== leafEl) return null;
+    return escalated;
+  }
+
+  function buildFieldCandidate(containerScope, leafEl, allInstances) {
+    var relSelector = Sel.buildRelativeSelector(containerScope, leafEl);
+    if (!relSelector) return null;
+
+    var attribute = Sel.suggestAttribute(leafEl);
+    var sampled = sampleFieldValues(containerScope, relSelector, attribute, allInstances);
+    if (!sampled) return null;
+
+    // ROOT CAUSE A gate: only fires for a candidate whose OWN samples
+    // already predominantly look price-like — never touches a Title,
+    // Link, Image, or any other field type, and never fires on a
+    // genuinely precise price selector (the overwhelmingly common case).
+    var priceLikeSampleRatio = sampled.samples.length
+      ? sampled.samples.filter(function (v) { return PRICE_RE.test(v); }).length / sampled.samples.length
+      : 0;
+    if (priceLikeSampleRatio >= 0.6) {
+      var precision = measureGlobalSelectorPrecision(relSelector, allInstances.length);
+      if (precision && precision.tooManyMatches && precision.priceLikeRatio < 0.5) {
+        var escalated = tryEscalateFieldSelector(containerScope, leafEl);
+        if (escalated) {
+          var escalatedPrecision = measureGlobalSelectorPrecision(escalated, allInstances.length);
+          var escalatedSampled = sampleFieldValues(containerScope, escalated, attribute, allInstances);
+          // Only accept the escalation if it's BOTH still usable
+          // (produced real values) and genuinely more precise than the
+          // original — otherwise fall through to rejecting the field
+          // entirely rather than shipping a selector no better than the
+          // poisoned one it was meant to replace.
+          if (escalatedSampled && (!escalatedPrecision || !escalatedPrecision.tooManyMatches || escalatedPrecision.priceLikeRatio >= 0.5)) {
+            relSelector = escalated;
+            sampled = escalatedSampled;
+          } else {
+            return null;
+          }
+        } else {
+          return null; // no more-specific selector available — drop this field rather than ship a poisoned one
+        }
+      }
+    }
 
     return {
       relativeSelector: relSelector,
       attribute: attribute,
       tagName: leafEl.tagName,
-      uniqueness: uniqueness,
-      coverage: coverage,
-      samples: samples,
+      uniqueness: sampled.uniqueness,
+      coverage: sampled.coverage,
+      samples: sampled.samples,
       isAnchor: leafEl.tagName === 'A',
       isImage: leafEl.tagName === 'IMG'
     };
@@ -1018,7 +1507,7 @@
           // — a table row selector built from just tag+classes could
           // otherwise match rows in a DIFFERENT table on the page that
           // happens to share the same markup pattern.
-          containerSelector: Sel.buildContainerSelector(rowsArr[0], rowsArr.length),
+          containerSelector: Sel.buildContainerSelector(rowsArr[0], rowsArr.length, rowsArr),
           score: score,
           confidence: scoreToConfidence(score),
           fields: fields.slice(0, MAX_FIELDS_PER_STRUCTURE)
@@ -1031,6 +1520,58 @@
   // =====================================================================
   // Orchestration
   // =====================================================================
+
+  /**
+   * REAL AMAZON EVIDENCE mission (TASK 2/4 — "row cohesion"): the real
+   * persisted scraper config proved Title and Price were each
+   * individually "detected" with SOME nonzero coverage
+   * (buildFieldCandidate's own coverage check only ever requires
+   * coverage > 0), but on almost entirely DISJOINT subsets of the
+   * candidate's own matched instances — Title resolved on the instances
+   * that happen to be title-rows, Price on the instances that happen to
+   * be price-rows, never together on the same instance. No existing
+   * check ever verified that the fields a candidate proposes actually
+   * belong to the SAME repeated record.
+   *
+   * For a representative, evenly-spread sample of the candidate's own
+   * instances (never just the first few — see sampleEvenly's own
+   * comment for why), resolves every detected field against EACH
+   * instance and counts how many of that instance's fields resolved to
+   * a real value SIMULTANEOUSLY. `completeRatio` — the fraction of
+   * instances where MOST detected fields (>= a generous 60%, since a
+   * genuinely optional field like a badge or a secondary image
+   * legitimately does not appear on every card) are present together —
+   * is the row-cohesion signal fed back into scoring below. A candidate
+   * with only one detected field is trivially 100% cohesive by
+   * construction (there is nothing to co-occur with) and is left alone
+   * — this only ever penalizes a MULTI-field candidate whose own fields
+   * don't actually belong together.
+   */
+  function computeRowCohesion(fields, allInstances) {
+    if (!fields || fields.length <= 1) {
+      return { completeRatio: 1, partialRatio: 0, emptyRatio: 0, sampleSize: 0, fieldCount: fields ? fields.length : 0 };
+    }
+    var sampleSize = Math.min(allInstances.length, COVERAGE_SAMPLE_SIZE);
+    var sample = sampleEvenly(allInstances, sampleSize);
+    var completeCount = 0, partialCount = 0, emptyCount = 0;
+    sample.forEach(function (inst) {
+      var present = 0;
+      fields.forEach(function (f) {
+        var el = f.relativeSelector === ':scope' ? inst : Sel.queryFromScope(inst, f.relativeSelector);
+        var val = Sel.extractValue(el, f.attribute, inst);
+        if (val) present++;
+      });
+      var ratio = present / fields.length;
+      if (ratio >= 0.6) completeCount++;
+      else if (ratio > 0) partialCount++;
+      else emptyCount++;
+    });
+    var n = sample.length || 1;
+    return {
+      completeRatio: completeCount / n, partialRatio: partialCount / n, emptyRatio: emptyCount / n,
+      sampleSize: sample.length, fieldCount: fields.length
+    };
+  }
 
   function runAutoDetect() {
     var t0 = Date.now();
@@ -1047,12 +1588,51 @@
     scored = scored.filter(function (c) { return !c.elements[0].closest || !c.elements[0].closest('table'); });
     scored = scored.slice(0, MAX_CANDIDATES);
 
+    // ROW/CONTAINER OVER-COUNTING FIX — second, independent layer of
+    // defense (the first is consolidateFragmentedGroups above, which
+    // prevents the wrong candidate from ever crowding out the right one
+    // in scoring): even a correctly-scored, correctly-chosen candidate's
+    // own containerSelector is only ever a BUILT APPROXIMATION
+    // (buildContainerSelector, content/selector.js) — if the DOM offers
+    // no selector that reproduces this candidate's own detected count
+    // exactly, that function's own documented fallback tier accepts the
+    // best available approximation rather than nothing (see its own
+    // header comment), which can still occasionally drift wide of the
+    // originally-detected scope. Rejecting a candidate whose FINAL,
+    // real, page-wide selector match count blows past a generous
+    // multiple of what was actually detected locally is the same
+    // invariant this whole fix is built on: one detected record should
+    // produce one row, not several — never Amazon-specific, this simply
+    // refuses to ship a selector that provably doesn't mean what it was
+    // detected to mean.
+    var MAX_SELECTOR_SCOPE_DRIFT = 3;
+
+    // PART A REBUILD (REAL AMAZON EVIDENCE mission, round 3) — HARD
+    // INVARIANT, not a score penalty: "A candidate with ZERO rows
+    // containing both Title and Price must be impossible to select when
+    // both fields are selected." A multi-field candidate whose own
+    // fields co-occur on fewer than this fraction of sampled instances
+    // is REJECTED OUTRIGHT — never added to `structures`, regardless of
+    // how strong its other signals look. A single-field candidate (only
+    // one thing detected — nothing to co-occur with) is exempt by
+    // definition, same as computeRowCohesion's own completeRatio===1
+    // default for that case.
+    var MIN_COHESION_RATIO = 0.3;
+
     var structures = [];
+    var cohesionRejectedCount = 0;
     for (var i = 0; i < scored.length; i++) {
       if (Date.now() - t0 > MAX_TIME_MS) break;
       var candidate = scored[i];
       var fields = detectFields(candidate.elements[0], candidate.elements);
       if (!fields.length) continue;
+
+      var cohesion = computeRowCohesion(fields, candidate.elements);
+      if (fields.length >= 2 && cohesion.completeRatio < MIN_COHESION_RATIO) {
+        cohesionRejectedCount++;
+        continue; // HARD GATE — this candidate can never become a structure, at any score
+      }
+
       // expectedCount: require the built selector to reproduce EXACTLY
       // this candidate's own grouped element count, not just "at least a
       // couple of matches somewhere in the document" — otherwise a
@@ -1060,13 +1640,36 @@
       // (different structural position — e.g. a promotional card reusing
       // the same product-card class) can still get pulled back in by a
       // too-broad selector when Extract Data re-queries the page later.
-      var containerSelector = Sel.buildContainerSelector(candidate.elements[0], candidate.elements.length);
+      //
+      // REAL AMAZON EVIDENCE mission — real, previously-hidden bug found
+      // via a test-infrastructure fix: siblingEls (3rd arg) was never
+      // passed here, so Sel.commonStableClasses() could never compute
+      // the classes actually COMMON to every instance — it silently fell
+      // back to the REPRESENTATIVE element's own full class list
+      // unfiltered. A representative that happens to carry an EXTRA
+      // per-instance class no other sibling has (a real, common shape —
+      // a "sponsored"/"best-match"/badge variant class on SOME cards,
+      // same real pattern already documented elsewhere in this file)
+      // produced a selector scoped to only that one variant instead of
+      // every instance. Passing candidate.elements lets
+      // commonStableClasses do its own job correctly.
+      var containerSelector = Sel.buildContainerSelector(candidate.elements[0], candidate.elements.length, candidate.elements);
+      var realMatchCount = Sel.countMatches(containerSelector);
+      if (realMatchCount > candidate.elements.length * MAX_SELECTOR_SCOPE_DRIFT) continue;
+      if (realMatchCount < candidate.elements.length) continue; // under-matching is just as wrong as over-matching — never ship a selector that provably misses instances this candidate itself already found
       structures.push({
         label: describeStructure(candidate, fields),
-        itemCount: candidate.elements.length,
+        // Honest, real count (mission's own "preview row count should be
+        // sane" requirement) — the ACTUAL number of elements
+        // containerSelector will really match at extraction time, not
+        // the pre-selector-building candidate.elements.length guess,
+        // which can legitimately differ once buildContainerSelector's
+        // own scoping/fallback logic runs.
+        itemCount: realMatchCount,
         containerSelector: containerSelector,
         score: candidate.score,
         confidence: scoreToConfidence(candidate.score),
+        rowCohesion: cohesion,
         fields: fields
       });
     }
@@ -1074,11 +1677,25 @@
     structures = tableStructures.concat(structures);
     structures.sort(function (a, b) { return b.score - a.score; });
 
+    // PART A REBUILD — FAIL SAFE: "If no candidate satisfies it, Auto
+    // Detect must FAIL SAFE and tell the user it could not determine the
+    // repeating row structure instead of producing garbage rows." Only
+    // fires when candidates genuinely existed and were rejected
+    // specifically by the cohesion gate (never for an ordinary "empty
+    // page" / "nothing found at all" case, which already reports
+    // ok:false with structures:[] on its own).
+    var failSafe = (structures.length === 0 && cohesionRejectedCount > 0);
+
     return {
       ok: structures.length > 0,
       structures: structures,
       scannedTruncated: scan.truncated,
-      elapsedMs: Date.now() - t0
+      elapsedMs: Date.now() - t0,
+      cohesionRejectedCount: cohesionRejectedCount,
+      failSafe: failSafe,
+      failSafeReason: failSafe
+        ? 'Could not determine a reliable repeating row structure: the candidates found never contained the selected fields together in the same record. Try Manual Mode (click each field directly) instead.'
+        : null
     };
   }
 
@@ -1100,8 +1717,8 @@
   // true) — never present in a packaged/Chrome-Web-Store build.
   // =====================================================================
 
-  function safeSelector(el) {
-    try { return Sel.buildContainerSelector(el) || '(no selector)'; } catch (e) { return '(selector build failed: ' + (e && e.message || e) + ')'; }
+  function safeSelector(el, siblingEls) {
+    try { return Sel.buildContainerSelector(el, siblingEls && siblingEls.length, siblingEls) || '(no selector)'; } catch (e) { return '(selector build failed: ' + (e && e.message || e) + ')'; }
   }
 
   function shortElementPath(el) {
@@ -1123,7 +1740,7 @@
       tag: c.tag,
       representativeElementPath: shortElementPath(c.elements[0]),
       allStableClassesOnRepresentative: Sel.getStableClasses(c.elements[0]),
-      approxSelector: safeSelector(c.elements[0]),
+      approxSelector: safeSelector(c.elements[0], c.elements),
       itemCount: c.elements.length,
       score: signals.score,
       confidence: scoreToConfidence(signals.score),
@@ -1143,7 +1760,13 @@
       mainContentBonusApplied: signals.mainBonus,
       nearEmptyPenaltyApplied: signals.nearEmptyPenalty,
       specificationPanelPenaltyApplied: signals.looksLikeAttributeList,
-      strongProductSignatureBonusApplied: signals.strongProductSignature
+      strongProductSignatureBonusApplied: signals.strongProductSignature,
+      // REAL AMAZON EVIDENCE mission — see the fragmentationPenalty
+      // comment in computeCandidateSignals for the full mechanism. null
+      // when this candidate was never consolidated (the normal case).
+      consolidatedFromParentCount: (typeof c.consolidatedFromParentCount === 'number') ? c.consolidatedFromParentCount : null,
+      elementsPerParent: signals.elementsPerParent,
+      fragmentationPenaltyApplied: signals.fragmentationPenalty
     };
   }
 
@@ -1153,7 +1776,7 @@
    * candidate that did NOT make it into the final structures — spec #8's
    * "MOST IMPORTANT" requirement. Checks membership at each successive
    * stage, in the exact order runAutoDetect() itself applies them. */
-  function computeRejectionReason(candidate, afterSort, afterDedup, afterTableFilter, afterSlice, survivedRawIndexes, timeBudgetExceeded) {
+  function computeRejectionReason(candidate, afterSort, afterDedup, afterTableFilter, afterSlice, survivedRawIndexes, timeBudgetExceeded, cohesionRejectedRawIndexes, scopeDriftRejectedRawIndexes, noFieldsRawIndexes) {
     var idx = candidate._rawIndex;
     var inDedup = afterDedup.some(function (c) { return c._rawIndex === idx; });
     if (!inDedup) return 'duplicate candidate — overlapped a higher-scored candidate of similar size (same or an ancestor/descendant element, item counts within 2 of each other)';
@@ -1163,6 +1786,14 @@
     if (!inSlice) return 'below the top-' + MAX_CANDIDATES + ' cutoff (MAX_CANDIDATES) after ranking — ' + afterTableFilter.length + ' candidates survived to this point, only the top ' + MAX_CANDIDATES + ' by score are fully analyzed';
     if (survivedRawIndexes[idx]) return '(not actually rejected — included in final structures)';
     if (timeBudgetExceeded) return 'scan time budget (MAX_TIME_MS=' + MAX_TIME_MS + 'ms) was exceeded before this candidate was reached';
+    if (noFieldsRawIndexes && noFieldsRawIndexes[idx]) return 'no usable fields could be extracted from this structure (detectFields returned 0 fields)';
+    // PART A REBUILD — the HARD co-occurrence gate: 2+ selected fields
+    // were detected, but they co-occurred together on too few of this
+    // candidate's own sampled instances (see rowCohesion on the raw
+    // candidate summary above for the exact ratio) — REJECTED OUTRIGHT,
+    // never merely down-scored.
+    if (cohesionRejectedRawIndexes && cohesionRejectedRawIndexes[idx]) return 'REJECTED by the hard row-cohesion invariant — its own detected fields (2+) co-occur on too few of its own sampled instances to represent one logical record together (see rowCohesion above)';
+    if (scopeDriftRejectedRawIndexes && scopeDriftRejectedRawIndexes[idx]) return 'this candidate\'s own built containerSelector matched far more elements page-wide than were actually detected locally (selector-scope drift) — rejected rather than shipping a selector that provably doesn\'t mean what it was detected to mean';
     return 'no usable fields could be extracted from this structure (detectFields returned 0 fields)';
   }
 
@@ -1189,6 +1820,24 @@
     report.scannedElements = scan.scannedCount;
     report.scannedTruncated = scan.truncated;
     report.rawCandidateGroupCount = scan.groups.length;
+    // ROW/CONTAINER OVER-COUNTING FIX diagnostics (mission's own explicit
+    // requirement — "candidate repeating container / matched element
+    // count / accepted logical row count / rejected non-product/non-row
+    // count"): how many per-parent groups existed before/after
+    // consolidateFragmentedGroups folded same-signature fragments (an
+    // internal layout row repeated many times inside each outer record)
+    // together.
+    report.rawGroupCountBeforeConsolidation = scan.rawGroupCountBeforeConsolidation;
+    report.groupCountAfterConsolidation = scan.groupCountAfterConsolidation;
+    report.fragmentGroupsConsolidated = (scan.rawGroupCountBeforeConsolidation || 0) - (scan.groupCountAfterConsolidation || 0);
+    // REAL AMAZON EVIDENCE mission (TASK 3) diagnostics: how many extra
+    // candidates were discovered by climbing from a heading via
+    // Sel.findRepeatingContainer rather than class-sharing.
+    report.anchoredCandidateCount = scan.anchoredCandidateCount || 0;
+    // PART A REBUILD diagnostics: how many extra candidates were
+    // discovered via the NEW field-anchored (title+price common-ancestor)
+    // method — the PRIMARY multi-field discovery method this round.
+    report.fieldAnchoredCandidateCount = scan.fieldAnchoredCandidateCount || 0;
 
     var scored = scan.groups.map(function (g, idx) {
       return Object.assign({}, g, { score: scoreCandidate(g), _rawIndex: idx });
@@ -1211,18 +1860,46 @@
     var timeBudgetExceeded = false;
     var finalStructures = [];
     var survivedRawIndexes = {};
+    var scopeDriftRejectedCount = 0;
+    var scopeDriftRejectedRawIndexes = {};
+    var cohesionRejectedCount = 0;
+    var cohesionRejectedRawIndexes = {};
+    var noFieldsRawIndexes = {};
+    var MIN_COHESION_RATIO = 0.3;
     for (var i = 0; i < sliced.length; i++) {
       if (Date.now() - t0 > MAX_TIME_MS) { timeBudgetExceeded = true; break; }
       var candidate = sliced[i];
       var fields = detectFields(candidate.elements[0], candidate.elements);
-      if (!fields.length) continue;
+      if (!fields.length) { noFieldsRawIndexes[candidate._rawIndex] = true; continue; }
+      // PART A REBUILD diagnostics — same HARD GATE runAutoDetect() itself
+      // applies (see that function's own comment for the full mechanism),
+      // so this diagnostic's accept/reject decision always matches real
+      // production behavior exactly, never a softer approximation.
+      var diagCohesion = computeRowCohesion(fields, candidate.elements);
+      if (fields.length >= 2 && diagCohesion.completeRatio < MIN_COHESION_RATIO) {
+        cohesionRejectedCount++;
+        cohesionRejectedRawIndexes[candidate._rawIndex] = true;
+        continue;
+      }
+      var diagSelector = safeSelector(candidate.elements[0], candidate.elements);
+      var diagRealMatchCount = Sel.countMatches(diagSelector);
+      if (diagRealMatchCount > candidate.elements.length * 3 || diagRealMatchCount < candidate.elements.length) { scopeDriftRejectedCount++; scopeDriftRejectedRawIndexes[candidate._rawIndex] = true; continue; }
       survivedRawIndexes[candidate._rawIndex] = true;
       finalStructures.push({
         candidateId: candidate._rawIndex,
         label: describeStructure(candidate, fields),
+        // itemCount stays the raw candidate.elements.length here (matches
+        // this diagnostic's own established pre-existing shape/callers);
+        // matchedElementCount is the NEW, honest "what will this selector
+        // actually match at real extraction time" figure the mission's
+        // own diagnostics requirement asks for.
         itemCount: candidate.elements.length,
-        containerSelector: safeSelector(candidate.elements[0]),
+        matchedElementCount: diagRealMatchCount,
+        containerSelector: diagSelector,
         representativeElementPath: shortElementPath(candidate.elements[0]),
+        anchoredFromHeading: !!candidate.anchoredFromHeading,
+        fieldAnchored: !!candidate.fieldAnchored,
+        rowCohesion: { completeRatio: round2(diagCohesion.completeRatio), partialRatio: round2(diagCohesion.partialRatio), emptyRatio: round2(diagCohesion.emptyRatio), sampleSize: diagCohesion.sampleSize, fieldCount: diagCohesion.fieldCount },
         score: candidate.score,
         confidence: scoreToConfidence(candidate.score),
         fieldCount: fields.length,
@@ -1233,6 +1910,19 @@
       });
     }
     report.timeBudgetExceededDuringFieldDetection = timeBudgetExceeded;
+    // "rejected non-product/non-row count" (mission's own explicit
+    // diagnostics requirement) — candidates that survived every earlier
+    // stage (scoring/dedup/table-filter/top-N-cutoff/field-detection)
+    // but were still rejected here because their own built selector's
+    // REAL match count blew past a generous multiple of what was
+    // actually detected locally (content/autodetect.js's runAutoDetect()
+    // applies the exact same rejection, unmodified — this diagnostic
+    // just also counts it).
+    report.scopeDriftRejectedCount = scopeDriftRejectedCount;
+    // PART A REBUILD diagnostics — how many candidates hit the HARD
+    // co-occurrence gate (2+ fields detected, but rarely/never together).
+    report.cohesionRejectedCount = cohesionRejectedCount;
+    report.failSafe = (finalStructures.length === 0 && tableStructures.length === 0 && cohesionRejectedCount > 0);
 
     var tableStructureSummaries = tableStructures.map(function (s) {
       return { source: 'table', label: s.label, itemCount: s.itemCount, containerSelector: s.containerSelector, score: s.score, confidence: s.confidence, fieldCount: s.fields.length, sampleFieldNames: s.fields.map(function (f) { return f.name; }) };
@@ -1276,7 +1966,7 @@
     report.rejectedCandidateCount = rejected.length;
     report.rejectedCandidates = rejected.slice(0, 40).map(function (c) {
       var summary = summarizeRawCandidate(c);
-      summary.rejectionReason = computeRejectionReason(c, sorted, deduped, tableFiltered, sliced, survivedRawIndexes, timeBudgetExceeded);
+      summary.rejectionReason = computeRejectionReason(c, sorted, deduped, tableFiltered, sliced, survivedRawIndexes, timeBudgetExceeded, cohesionRejectedRawIndexes, scopeDriftRejectedRawIndexes, noFieldsRawIndexes);
       return summary;
     });
     if (rejected.length > 40) report.rejectedCandidatesNoteTruncated = (rejected.length - 40) + ' additional rejected candidate(s) not shown (capped at 40, largest-by-item-count first).';

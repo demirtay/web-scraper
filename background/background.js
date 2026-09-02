@@ -416,7 +416,8 @@ var CONTENT_FILES = [
   'content/autopaginate.js',
   'utils/discovery.js',
   'content/loadmore.js',
-  'content/discovery.js'
+  'content/discovery.js',
+  'content/realdomdiag.js'
 ];
 // NEW FEATURE — AUTOMATIC PAGINATION (Auto Next, optional, OFF by
 // default), content/nextdetect.js + content/autopaginate.js above:
@@ -2005,11 +2006,34 @@ function startDeepScrapeWatchdog(state, controller) {
 // code path, not a test) — just enough to honestly distinguish a real
 // SITE_CHALLENGE from a genuine extraction/selector problem, never used
 // to bypass or work around what it detects.
+// REAL DETAIL ENRICHMENT VERIFICATION mission — real production report:
+// EVERY real Amazon Detail Enrichment record failed fast and non-
+// retryably (0 completed, 0 partial across 302 real product-page
+// visits, despite genuinely watching the worker navigate through many
+// of them) — a 100% false-positive rate no genuine, intermittent
+// anti-bot challenge could produce. Root cause: the two entries removed
+// below, `[id*="px-" i]`/`[class*="px-" i]`, matched ANY element on the
+// page whose id/class attribute contained the substring "px-"
+// ANYWHERE — not merely PerimeterX's own actual challenge markup
+// (already correctly, narrowly covered by `#px-captcha` just above).
+// "px-" is an extremely common short prefix in real-world CSS (Tailwind-
+// style spacing utilities like `px-4`, ad/analytics "pixel" wrapper
+// ids, hashed CSS-in-JS class names, etc.) — on a real, complex,
+// React-driven page like an Amazon product listing, at least one
+// unrelated element matching this substring on virtually every page
+// load is a near-certainty, not an edge case. `pageLooksLikeChallenge()`
+// therefore misclassified ordinary product pages as SITE_CHALLENGE
+// (`retryable: false`) BEFORE extraction ever ran — explaining every
+// reported symptom: real navigation observed, fast non-retrying
+// failures cycling through many distinct URLs, and zero values ever
+// reaching `ws_deepscrape_fields` for any record. Removed as pure
+// noise: the specific, correct PerimeterX challenge marker
+// (`#px-captcha`) and the other providers' own real markers below are
+// unaffected and still fully detected.
 var DEEP_SCRAPE_CHALLENGE_SELECTORS = [
   'iframe[src*="recaptcha" i]', 'iframe[title*="recaptcha" i]',
   'iframe[src*="hcaptcha" i]', '#px-captcha', '[id*="captcha" i]',
-  '[class*="captcha" i]', 'iframe[src*="challenges.cloudflare" i]',
-  '[id*="px-" i]', '[class*="px-" i]'
+  '[class*="captcha" i]', 'iframe[src*="challenges.cloudflare" i]'
 ];
 // Injected via chrome.scripting.executeScript's `func` (self-contained —
 // runs in the target page's own isolated world, cannot reference

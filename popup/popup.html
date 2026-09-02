@@ -111,24 +111,20 @@
           <table id="setup-preview-table"></table>
         </div>
 
-        <!-- AUTOMATIC DISCOVERY ENGINE mission (UI cleanup, section 14):
-             these two controls are implementation details the normal user
-             should never need to understand or choose (mission section 1:
-             "The user should NOT have to understand how a website loads
-             additional data") — content/discovery.js now ALWAYS decides
-             pagination vs. infinite scroll vs. Load More vs. a hybrid
-             automatically, every time, unconditionally (see popup.js's
-             handleStartLiveSession — their `.checked` state is no longer
-             read at all). Hidden here rather than deleted, exactly per
-             CLAUDE.md's own "do not remove/delete underlying capabilities
-             or controls prematurely" — the checkboxes and their labels
-             stay in the DOM, inert, so a later mission can restore or
-             finally remove this markup without having to reconstruct it. -->
-        <div class="ws-checkbox-row" hidden>
-          <label><input type="checkbox" id="auto-next-toggle" /> <span data-i18n="liveSession.autoNextLabel">Auto Next</span></label>
-          <label><input type="checkbox" id="auto-scroll-toggle" /> <span data-i18n="liveSession.autoScrollLabel">Auto Scroll</span></label>
-        </div>
-
+        <!-- AMAZON PAGINATION FIX mission — REMOVED COMPLETELY (not just
+             hidden): the old "Otomatik Sonraki"/"Otomatik Kaydırma"
+             ("Auto Next"/"Auto Scroll") checkboxes that used to sit here.
+             They were already fully inert (see git history/MISSION.md for
+             the prior "hidden, not deleted" state) — content/discovery.js
+             has ALWAYS decided pagination vs. infinite scroll vs. Load
+             More automatically since the Automatic Discovery Engine
+             shipped, and popup.js's handleStartLiveSession never read
+             their `.checked` state. This pass removes the dead markup
+             itself (and its two now-orphaned i18n keys) per this
+             mission's own explicit "do not merely hide them" instruction
+             — BAŞLA's own behavior is completely unchanged, since it
+             never depended on these elements existing in the first
+             place. -->
         <button id="basla-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="liveSession.basla">BAŞLA</button>
 
         <!-- ============ Gelişmiş (advanced/power-user escape hatch) ============
@@ -1288,6 +1284,47 @@
             <button type="button" id="pagination-diag-copy-btn" class="ws-chip-btn">📋 Copy Pagination Diagnostic</button>
             <p id="pagination-diag-status" class="ws-note" style="margin-top:4px;"></p>
             <textarea id="pagination-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+          </div>
+
+          <!-- REAL AMAZON EVIDENCE mission — read-only, dev-only mirror of
+               content/nextdetect.js's own findNextControl() detection tiers
+               (Tier 0 rel=next link, Tier 1 rel=next element, Tier 2 exact
+               accessible-name, Tier 3 pagination-landmark, Tier 4 href
+               page-number fallback, Tier 5 structural page-number-cluster
+               adjacency), via the existing, unmodified
+               findNextControlDiagnostic() function. ONLY reads the CURRENT
+               page DOM and the CURRENT session's already-persisted
+               scraperConfig.containerSelector (content/discovery.js's
+               RUN_NEXT_DETECT_DIAGNOSTIC handler — a plain getSession()
+               read, same as the pre-existing GET_DISCOVERY_STATE handler)
+               — never starts a scrape, never reloads the page, never
+               resets the session, never writes to storage, never clicks
+               anything. Reports every candidate inspected at every tier
+               (tag/text/aria-label/href/disabled/reject-reason) so a real
+               "why wasn't the visible Next control found" report can be
+               produced from one paste, exactly like the 3 diagnostics
+               above it. -->
+          <div id="nextdetect-diag-panel" class="ws-devtools-item" hidden>
+            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+            <button type="button" id="nextdetect-diag-copy-btn" class="ws-chip-btn">📋 Copy Next-Detect Diagnostic</button>
+            <p id="nextdetect-diag-status" class="ws-note" style="margin-top:4px;"></p>
+            <textarea id="nextdetect-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+          </div>
+
+          <!-- REAL AMAZON EVIDENCE mission — TEMPORARY, evidence-only.
+               content/realdomdiag.js is entirely self-contained: it only
+               READS content/autodetect.js's own pre-existing, already
+               read-only runAutoDetectDiagnostic() output plus raw
+               document.querySelectorAll() results, never calls
+               runAutoDetect() itself, never touches
+               content/nextdetect.js, never scrapes/navigates/clicks/
+               writes to storage. Meant to be removed once real-Chrome
+               evidence has been captured — not a permanent feature. -->
+          <div id="realdom-diag-panel" class="ws-devtools-item" hidden>
+            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+            <button type="button" id="realdom-diag-copy-btn" class="ws-chip-btn">📋 Copy Real DOM Diagnostic</button>
+            <p id="realdom-diag-status" class="ws-note" style="margin-top:4px;"></p>
+            <textarea id="realdom-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
           </div>
 
           <!-- SELF-DIAGNOSTICS / HEALTH CHECK (DEV ONLY) — observes and
