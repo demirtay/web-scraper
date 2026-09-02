@@ -66,6 +66,7 @@
     researchGoScrapeBtn: document.getElementById('research-go-scrape-btn'),
 
     scrapeWorkflowSteps: document.getElementById('scrape-workflow-steps'),
+    scrapeLastRunCard: document.getElementById('scrape-last-run-card'),
     scrapeStatusText: document.getElementById('scrape-status-text'),
     scrapeViewResultsBtn: document.getElementById('scrape-view-results-btn'),
     firstRunHelp: document.getElementById('first-run-help'),
@@ -145,6 +146,11 @@
     paginationDiagStatus: document.getElementById('pagination-diag-status'),
     paginationDiagTextarea: document.getElementById('pagination-diag-textarea'),
     healthCheckPanel: document.getElementById('health-check-panel'),
+    resultsDevtoolsPanel: document.getElementById('results-devtools-panel'),
+    stickyStatusBar: document.getElementById('sticky-status-bar'),
+    stickyStatusText: document.getElementById('sticky-status-text'),
+    stickyStatusStopBtn: document.getElementById('sticky-status-stop-btn'),
+    appRoot: document.getElementById('app'),
     healthCheckRunBtn: document.getElementById('health-check-run-btn'),
     healthCheckOverall: document.getElementById('health-check-overall'),
     healthCheckMain: document.getElementById('health-check-main'),
@@ -515,6 +521,7 @@
     dtResumeBtn: document.getElementById('dt-resume-btn'),
     dtRetryFailedBtn: document.getElementById('dt-retry-failed-btn'),
     dtNewRunBtn: document.getElementById('dt-new-run-btn'),
+    dtViewResultsBtn: document.getElementById('dt-view-results-btn'),
     dtResetBtn: document.getElementById('dt-reset-btn'),
     dtSummaryText: document.getElementById('dt-summary-text'),
 
@@ -866,6 +873,24 @@
     { value: 'url', label: 'URL' }
   ];
 
+  /** FINAL UI REORGANIZATION mission — real production report: several
+   * status badges displayed the raw internal status ENUM VALUE
+   * uppercased (e.g. `state.status.toUpperCase()`), which is always
+   * English regardless of the popup's own locale — a real mixed-
+   * language bug ("COMPLETED"/"Failed" appearing in an otherwise
+   * localized Turkish UI). Maps a known status through the new
+   * `status.*` i18n keys; an unmapped/unexpected status value safely
+   * falls back to the raw uppercased text (never blank, never throws) —
+   * the exact same "never undefined, never blank" fallback philosophy
+   * utils/i18n.js's own t() already uses for a missing key. */
+  function localizedStatusLabel(status) {
+    if (!status) return '';
+    var key = 'status.' + status;
+    var translated = WSI18n.t(key);
+    if (translated === key) return String(status).toUpperCase(); // no i18n entry for this status — honest fallback, never invented text
+    return translated.toUpperCase();
+  }
+
   function attrLabel(attr) {
     if (attr === 'href') return 'Link';
     if (attr === 'src') return 'Image';
@@ -1014,13 +1039,13 @@
       var upBtn = document.createElement('button');
       upBtn.className = 'ws-column-reorder';
       upBtn.textContent = '▲';
-      upBtn.title = 'Move up'; upBtn.setAttribute('aria-label', 'Move up');
+      upBtn.title = WSI18n.t('action.moveUp'); upBtn.setAttribute('aria-label', WSI18n.t('action.moveUp'));
       upBtn.disabled = index === 0;
       upBtn.addEventListener('click', function () { moveColumn(index, -1); });
       var downBtn = document.createElement('button');
       downBtn.className = 'ws-column-reorder';
       downBtn.textContent = '▼';
-      downBtn.title = 'Move down'; downBtn.setAttribute('aria-label', 'Move down');
+      downBtn.title = WSI18n.t('action.moveDown'); downBtn.setAttribute('aria-label', WSI18n.t('action.moveDown'));
       downBtn.disabled = index === state.columns.length - 1;
       downBtn.addEventListener('click', function () { moveColumn(index, 1); });
       reorderGroup.appendChild(upBtn);
@@ -1144,17 +1169,17 @@
   }
 
   async function handleAddColumn() {
-    setStatus('Preparing selection mode…', false);
+    setStatus(WSI18n.t('msg.preparingSelection'), false);
     try {
       await sendToContent({ type: 'START_PICK' });
-      setStatus('Click an element on the page to select it (Esc to cancel).', false);
+      setStatus(WSI18n.t('msg.clickElementToSelect'), false);
     } catch (e) {
-      setStatus("Couldn't start selection on this page.", true);
+      setStatus(WSI18n.t('msg.couldNotStartSelection'), true);
     }
   }
 
   async function handleResetColumns() {
-    if (!confirm('Remove all columns saved for this site?')) return;
+    if (!confirm(WSI18n.t('confirm.removeAllColumns'))) return;
     await WSStorage.clearState(hostname);
     state = WSStorage.emptyState();
     loadedScraperId = null;
@@ -1167,7 +1192,7 @@
     await WSRecipes.setLoadedScraperId(hostname, null);
     renderColumns();
     clearResults();
-    setStatus('Columns cleared.', false);
+    setStatus(WSI18n.t('msg.columnsCleared'), false);
   }
 
   // =====================================================================
@@ -1186,16 +1211,16 @@
   }
 
   async function handleAutoDetect() {
-    setStatus('Analyzing page… finding repeating structures…', false);
+    setStatus(WSI18n.t('msg.analyzingPage'), false);
     var res;
     try {
       res = await sendToContent({ type: 'RUN_AUTO_DETECT' });
     } catch (e) {
-      setStatus("Couldn't analyze this page.", true);
+      setStatus(WSI18n.t('msg.couldNotAnalyzePage'), true);
       return;
     }
     if (!res || !res.ok || !res.structures || !res.structures.length) {
-      setStatus('No strong repeating structure detected. Use "+ Add Column" to select fields manually.', true);
+      setStatus(WSI18n.t('msg.noStrongStructure'), true);
       return;
     }
     autoDetectResult = res;
@@ -1224,8 +1249,7 @@
     // V1.17 #11: "Detected dataset: N rows, M columns" — makes the shape
     // of what's about to be scraped obvious before the user commits,
     // same spirit as spec's own worked example.
-    els.adStructureMeta.textContent = 'Detected dataset: ' + structure.itemCount + ' row' + (structure.itemCount === 1 ? '' : 's') +
-      ', ' + structure.fields.length + ' column' + (structure.fields.length === 1 ? '' : 's');
+    els.adStructureMeta.textContent = WSI18n.t('autoMode.detectedDataset', { rows: structure.itemCount, cols: structure.fields.length });
 
     els.adFieldsList.innerHTML = '';
     structure.fields.forEach(function (field, idx) {
@@ -1263,7 +1287,7 @@
       if (field.quality && field.quality.label === 'Fragile') {
         var qualityEl = document.createElement('span');
         qualityEl.className = 'ws-ad-field-quality-warn';
-        qualityEl.textContent = 'Fragile selector';
+        qualityEl.textContent = WSI18n.t('autoMode.fragileSelector');
         qualityEl.title = (field.quality.reasons || []).join('; ');
         nameRow.appendChild(qualityEl);
       }
@@ -1322,7 +1346,7 @@
     var structure = currentAutoDetectStructure();
     var fields = getCheckedAutoDetectFields();
     if (!structure || !fields.length) {
-      setStatus('Select at least one field first.', true);
+      setStatus(WSI18n.t('msg.selectFieldFirst'), true);
       return;
     }
     state = {
@@ -2252,6 +2276,23 @@
     if (!isDev) return;
     try { await computeAndRenderHealthCheck(); } catch (e) { /* best-effort initial render */ }
   }
+
+  /** FINAL UI REORGANIZATION mission — the OUTER "▸ Geliştirici Araçları"
+   * <details> wrapper (#results-devtools-panel) now containing #session-
+   * diag-panel/#pagination-diag-panel/#health-check-panel needs its own
+   * hidden/reveal gate too: each inner panel already independently gates
+   * itself (unchanged), but without this, the wrapper's own <summary>
+   * label would be visible in a production/store build even though every
+   * panel inside it correctly stayed hidden — the whole GROUP must be
+   * invisible outside a development install, not just its contents. Same
+   * isDevelopmentInstall() contract as every other dev-only reveal in
+   * this file; called alongside the 3 existing ones below. */
+  async function revealResultsDevToolsPanelIfDev() {
+    if (!els.resultsDevtoolsPanel) return;
+    var isDev = false;
+    try { isDev = await WSLicense.isDevelopmentInstall(); } catch (e) { isDev = false; }
+    els.resultsDevtoolsPanel.hidden = !isDev;
+  }
   // ================= END SELF-DIAGNOSTICS / HEALTH CHECK =================
 
   /** V1 UX WORKFLOW SIMPLIFICATION spec: the Extract button shows the live
@@ -2891,6 +2932,7 @@
       revealSessionDiagPanelIfDev();
       revealPaginationDiagPanelIfDev();
       revealHealthCheckPanelIfDev();
+      revealResultsDevToolsPanelIfDev();
       if (!watchStarted) {
         // Surfaced as a non-blocking warning, not an error — the initial
         // extraction/results/credit above all succeeded regardless; this
@@ -2982,6 +3024,103 @@
    * export gate) in sync with `activeLiveSession` — called after every
    * renderResults() and after every storage.onChanged update, so it can
    * never drift from what rawRows/the table are actually showing. */
+  /** FINAL UI REORGANIZATION mission — GLOBAL STICKY STATUS BAR (section
+   * 6): a compact, read-only footer visible on every tab while
+   * scrolling. Strictly UI-only by construction — reads only data that
+   * OTHER, pre-existing render functions already computed
+   * (activeLiveSession / lastRenderedDetailState, the latter cached
+   * purely for this by renderDetailProgress()'s own comment); owns no
+   * timer, no polling loop, no state machine, and this function itself
+   * never runs on any schedule of its own — it is only ever called from
+   * the exact same render passes (renderLiveSessionUI()/
+   * renderDetailProgress()) that already fire whenever the underlying
+   * state genuinely changes. Its one action button
+   * (#sticky-status-stop-btn) is wired (see wireEventListeners below) to
+   * the SAME handleStopAutoPaginate() function #durdur-btn already uses
+   * — never a second Stop implementation, never a duplicate DURDUR. */
+  /** FINAL UI POLISH PASS (mission section 6) — prevents the sticky bar
+   * from ever covering the last table rows/export buttons/accordion
+   * headers/Detail actions/Dev Tools controls: `position: sticky`
+   * elements overlay whatever's currently at the viewport's bottom edge
+   * while "stuck" mid-scroll (they only stop overlapping once the true
+   * end of the document's own flow — which is where the bar physically
+   * sits, right after #app — actually scrolls into view). Reserving the
+   * bar's own height as bottom padding on #app whenever it's visible
+   * means #app's real last content always ends that same distance above
+   * the true bottom of the page, so the bar only ever sits over its own
+   * reserved padding, never real content. Toggled off (padding removed)
+   * whenever the bar itself is hidden, so no dead space is added to the
+   * idle/no-session view. Pure CSS-class toggle — no timer, no layout
+   * measurement, no new state of its own; mirrors the same `hidden` flag
+   * this function already sets. */
+  function setStickyStatusBarVisible(visible) {
+    els.stickyStatusBar.hidden = !visible;
+    if (els.appRoot) els.appRoot.classList.toggle('ws-has-sticky-status', !!visible);
+  }
+
+  function renderStickyStatus() {
+    if (!els.stickyStatusBar || !els.stickyStatusText) return;
+
+    // FINAL UI POLISH PASS (mission section 5) — context-aware by active
+    // tab, still UI-only: owns no state of its own, only ever READS
+    // lastRenderedDetailState/activeLiveSession/activeTab (each already
+    // maintained elsewhere) and derives display text from them.
+    var detailState = lastRenderedDetailState;
+    var detailRunning = !!(detailState && ['running', 'stopping'].indexOf(detailState.status) !== -1);
+    var onDetailTab = activeTab === 'detay';
+
+    // While Detail is actively running/stopping, it takes precedence from
+    // ANY tab — matches this bar's own "Detay 580 / 1263 • %46 •
+    // Çalışıyor" example, and preserves the pre-existing "know Detail
+    // work is still happening, Stop from anywhere" visibility this bar
+    // was originally built for. Once Detail reaches a terminal state
+    // (completed/stopped/error), it only keeps showing here while the
+    // user is actually on the Detay tab (matches "Detay 1263/1263 • 1175
+    // başarılı • Tamamlandı") — every other tab falls through to the
+    // ordinary main-scrape/session status below. Detail already has its
+    // own Stop control (dt-stop-btn) on the Detay tab, so this bar never
+    // shows a second one for it, in either case.
+    if (detailRunning || (onDetailTab && detailState)) {
+      var dc = detailState.counts || {};
+      var done = (dc.completed || 0) + (dc.partial || 0) + (dc.failed || 0) + (dc.skipped || 0);
+      var pct = dc.total ? Math.round((done / dc.total) * 100) : 0;
+      var detailPrefix = WSI18n.t('healthCheck.detail') + ' ' + done + ' / ' + (dc.total || 0);
+      els.stickyStatusText.textContent = detailRunning
+        ? (detailPrefix + ' • %' + pct + ' • ' + WSI18n.t('status.running'))
+        : (detailPrefix + ' • ' + WSI18n.t('detail.stickySuccess', { count: dc.completed || 0 }) + ' • ' + localizedStatusLabel(detailState.status));
+      if (els.stickyStatusStopBtn) els.stickyStatusStopBtn.hidden = true;
+      setStickyStatusBarVisible(true);
+      return;
+    }
+
+    if (!activeLiveSession) { setStickyStatusBarVisible(false); return; }
+    var discovery = activeLiveSession.discovery;
+    var rowCount = activeLiveSession.rows ? activeLiveSession.rows.length : 0;
+    var rowsText = WSI18n.t('sticky.recordCount', { count: rowCount });
+    var isRunning = activeLiveSession.status === 'active' && !!(discovery && discovery.status === 'discovering');
+
+    if (isRunning) {
+      var pageText = WSI18n.t('liveSession.scanningPage', { page: discovery.pagesVisited || 1 });
+      els.stickyStatusText.textContent = rowsText + ' • ' + pageText;
+      if (els.stickyStatusStopBtn) els.stickyStatusStopBtn.hidden = false;
+      setStickyStatusBarVisible(true);
+      return;
+    }
+
+    // Idle/completed — a session exists but is no longer actively
+    // discovering (matches this bar's own "1263 kayıt • 22 sayfa •
+    // Tamamlandı" example).
+    if (els.stickyStatusStopBtn) els.stickyStatusStopBtn.hidden = true;
+    if (discovery) {
+      var pagesText = WSI18n.t('sticky.pageCount', { count: discovery.pagesVisited || 1 });
+      var stateText = discovery.status === 'discovering' ? WSI18n.t('status.running') : WSI18n.t('status.completed');
+      els.stickyStatusText.textContent = rowsText + ' • ' + pagesText + ' • ' + stateText;
+    } else {
+      els.stickyStatusText.textContent = rowsText;
+    }
+    setStickyStatusBarVisible(true);
+  }
+
   function renderLiveSessionUI() {
     if (!els.liveSessionStatus) return;
     if (!activeLiveSession) {
@@ -2990,6 +3129,7 @@
       if (els.exportGate) els.exportGate.hidden = false;
       if (els.autoPaginateStatus) els.autoPaginateStatus.hidden = true;
       if (els.durdurBtn) els.durdurBtn.hidden = true;
+      renderStickyStatus();
       return;
     }
     els.liveSessionStatus.hidden = false;
@@ -3063,6 +3203,7 @@
     if (els.durdurBtn) els.durdurBtn.hidden = !((apRunning || asRunning || discovering) && activeLiveSession.status === 'active');
 
     renderDiscoveryUI();
+    renderStickyStatus();
   }
 
   /** AUTOMATIC DISCOVERY STATUS + PROCESSING CHOICE UI (data-integrity/UX
@@ -3091,11 +3232,28 @@
   function renderDiscoveryUI() {
     if (!els.discoveryPanel) return;
     var discovery = activeLiveSession && activeLiveSession.discovery;
+
+    // FINAL UI POLISH PASS — remove duplicated summary metrics: whenever
+    // this panel is about to show, it already conveys "how many unique
+    // records / how many pages / status" more specifically than
+    // results-status-text ("N sonuç hazır") and live-session-status
+    // ("N veri işlendi") ever did — showing all three lines at once was
+    // the exact reported "1263 sonuç hazır / 1263 veri işlendi / 1263
+    // benzersiz kayıt bulundu" triple-duplication. Presentation-only:
+    // neither element's own value/computation ever changes (results-
+    // status-text's own updateResultsEmptyState() keeps setting its
+    // text exactly as before), it is just not rendered a second time.
+    // A live session WITHOUT discovery (a legacy session, or no live
+    // session at all) is completely unaffected — these two remain the
+    // only status shown, exactly as before this pass.
+    if (els.resultsStatusText) els.resultsStatusText.hidden = !!discovery;
+
     if (!discovery) {
       els.discoveryPanel.hidden = true;
       return;
     }
     els.discoveryPanel.hidden = false;
+    if (els.liveSessionStatus) els.liveSessionStatus.hidden = true;
 
     var isDiscovering = discovery.status === 'discovering';
     // 'error' (BUG REOPEN diagnostics addition — content/discovery.js's
@@ -3117,16 +3275,18 @@
       els.discoveryStatusLine2.textContent = WSI18n.t('discovery.pagesScanned', { count: discovery.pagesVisited || 1 });
     }
     if (els.discoveryStatusLine3) {
-      // Hide the status-line3 sentence entirely once a processing
-      // selection exists — the summary panel below takes over saying
-      // what happened, and showing both is redundant clutter (mission
-      // section 9: "do not clutter the UI").
-      els.discoveryStatusLine3.hidden = hasSelection;
-      if (!hasSelection) {
-        els.discoveryStatusLine3.textContent = isDiscovering
-          ? WSI18n.t('discovery.statusDiscovering')
-          : ((discovery.status === 'discovery_stopped' || discovery.status === 'error') ? WSI18n.t('discovery.statusStopped') : WSI18n.t('discovery.statusComplete'));
-      }
+      // FINAL UI POLISH PASS: this line now ALWAYS stays visible whenever
+      // the panel is showing (previously hidden entirely once a
+      // processing selection existed). Relocated in the HTML to the end
+      // of the panel, it is now the compact summary's one persistent
+      // "Durum: ..." line — nothing else on the card repeats it, so
+      // keeping it up is no longer redundant clutter the way it would
+      // have been alongside the old duplicated top-of-card status text.
+      // Presentation-only: same discovery.status value, same translated
+      // copy, just always shown instead of hidden after a selection.
+      els.discoveryStatusLine3.textContent = isDiscovering
+        ? WSI18n.t('discovery.statusDiscovering')
+        : ((discovery.status === 'discovery_stopped' || discovery.status === 'error') ? WSI18n.t('discovery.statusStopped') : WSI18n.t('discovery.statusComplete'));
     }
 
     // SELF-DIAGNOSTICS / HEALTH CHECK mission — record exactly what was
@@ -3165,8 +3325,24 @@
     if (els.discoverySummaryPanel) els.discoverySummaryPanel.hidden = !hasSelection;
     if (hasSelection) {
       var sel = discovery.processingSelection;
-      if (els.discoverySummaryFound) els.discoverySummaryFound.textContent = WSI18n.t('discovery.uniqueDiscovered', { count: discovery.discoveredUnique || 0 });
-      if (els.discoverySummaryProcessed) els.discoverySummaryProcessed.textContent = WSI18n.t('discovery.summaryProcessed', { count: sel.processedCount || 0 });
+      // FINAL UI POLISH PASS: discovery-summary-found always repeats the
+      // exact same key/count discovery-status-line1 above already shows
+      // — a genuine literal duplicate in every case, so it stays hidden
+      // (its text is still kept current, only never displayed a second
+      // time). discovery-summary-processed is NOT always a duplicate — a
+      // "FIRST N" selection can process fewer rows than were discovered,
+      // so that one is hidden only when its count happens to be identical
+      // to the found count (i.e. an "ALL" selection), and shown whenever
+      // it carries genuinely different information.
+      if (els.discoverySummaryFound) {
+        els.discoverySummaryFound.hidden = true;
+        els.discoverySummaryFound.textContent = WSI18n.t('discovery.uniqueDiscovered', { count: discovery.discoveredUnique || 0 });
+      }
+      var processedCount = sel.processedCount || 0;
+      if (els.discoverySummaryProcessed) {
+        els.discoverySummaryProcessed.hidden = processedCount === (discovery.discoveredUnique || 0);
+        els.discoverySummaryProcessed.textContent = WSI18n.t('discovery.summaryProcessed', { count: processedCount });
+      }
       if (els.discoverySummaryDuplicates) els.discoverySummaryDuplicates.textContent = WSI18n.t('discovery.summaryDuplicates', { count: discovery.duplicateEncounters || 0 });
       if (els.discoverySummaryInvalid) els.discoverySummaryInvalid.textContent = WSI18n.t('discovery.summaryInvalid', { count: discovery.invalidSkipped || 0 });
     }
@@ -3340,6 +3516,7 @@
     revealSessionDiagPanelIfDev();
     revealPaginationDiagPanelIfDev();
     revealHealthCheckPanelIfDev();
+    revealResultsDevToolsPanelIfDev();
     switchTab('results');
     return true;
   }
@@ -3403,16 +3580,16 @@
   var structuredDataFields = []; // last SCAN_STRUCTURED_DATA result, session-only (never persisted)
 
   async function handleStructuredDataClick() {
-    setStatus('Scanning the page for structured data…', false);
+    setStatus(WSI18n.t('msg.scanningStructuredData'), false);
     var res;
     try {
       res = await sendToContent({ type: 'SCAN_STRUCTURED_DATA' });
     } catch (e) {
-      setStatus("Couldn't scan this page for structured data.", true);
+      setStatus(WSI18n.t('msg.couldNotScanStructuredData'), true);
       return;
     }
     if (!res || !res.ok) {
-      setStatus("Couldn't scan this page for structured data.", true);
+      setStatus(WSI18n.t('msg.couldNotScanStructuredData'), true);
       return;
     }
     structuredDataFields = res.fields || [];
@@ -3521,7 +3698,7 @@
    * "Name (structured)" rather than a silent collision. */
   function handleStructuredDataAdd() {
     var fields = getCheckedStructuredDataFields();
-    if (!fields.length) { setStatus('Select at least one field first.', true); return; }
+    if (!fields.length) { setStatus(WSI18n.t('msg.selectFieldFirst'), true); return; }
 
     var existingNames = {};
     state.columns.forEach(function (c) { existingNames[c.name.trim().toLowerCase()] = true; });
@@ -3581,7 +3758,7 @@
 
   async function ensureTemplateScan() {
     if (lastTemplateScan) return lastTemplateScan;
-    setStatus('Scanning the page for template suggestions…', false);
+    setStatus(WSI18n.t('msg.scanningTemplateSuggestions'), false);
     var autoDetectResult = { structures: [] };
     var structuredScanResult = { ok: true, snapshot: { jsonLd: { entities: [], errors: [] }, meta: {} }, fields: [] };
     try {
@@ -3614,7 +3791,7 @@
         return (t ? t.icon + ' ' + t.name : s.templateId) + ' (' + s.confidence + ')';
       });
       els.tplSuggestionNote.hidden = false;
-      els.tplSuggestionNote.textContent = 'Suggested for this page: ' + names.join(', ') + '.';
+      els.tplSuggestionNote.textContent = WSI18n.t('templates.suggestedFor', { names: names.join(', ') });
     } else {
       els.tplSuggestionNote.hidden = true;
     }
@@ -3633,7 +3810,7 @@
     head.className = 'ws-template-head';
     var icon = document.createElement('span'); icon.className = 'ws-template-icon'; icon.textContent = t.icon || '📄';
     var name = document.createElement('span'); name.className = 'ws-template-name'; name.textContent = t.name;
-    var badge = document.createElement('span'); badge.className = 'ws-template-badge'; badge.textContent = isCustom ? 'Custom' : 'Built-in';
+    var badge = document.createElement('span'); badge.className = 'ws-template-badge'; badge.textContent = isCustom ? WSI18n.t('templates.custom') : WSI18n.t('templates.builtin');
     head.appendChild(icon); head.appendChild(name); head.appendChild(badge);
 
     var desc = document.createElement('p');
@@ -3643,7 +3820,7 @@
     var actions = document.createElement('div');
     actions.className = 'ws-template-actions';
     var previewBtn = document.createElement('button');
-    previewBtn.textContent = 'Preview';
+    previewBtn.textContent = WSI18n.t('action.preview');
     previewBtn.addEventListener('click', function () { openTemplatePreview(t); });
     actions.appendChild(previewBtn);
 
@@ -3651,16 +3828,16 @@
     // custom (saved/imported) template gets management actions at all.
     if (isCustom) {
       var renameBtn = document.createElement('button');
-      renameBtn.textContent = 'Rename';
+      renameBtn.textContent = WSI18n.t('action.rename');
       renameBtn.addEventListener('click', function () { handleRenameTemplate(t); });
       var dupBtn = document.createElement('button');
-      dupBtn.textContent = 'Duplicate';
+      dupBtn.textContent = WSI18n.t('action.duplicate');
       dupBtn.addEventListener('click', function () { handleDuplicateTemplate(t); });
       var exportBtn = document.createElement('button');
-      exportBtn.textContent = 'Export';
+      exportBtn.textContent = WSI18n.t('action.export');
       exportBtn.addEventListener('click', function () { handleExportTemplate(t); });
       var delBtn = document.createElement('button');
-      delBtn.textContent = 'Delete';
+      delBtn.textContent = WSI18n.t('action.delete');
       delBtn.className = 'ws-scraper-danger';
       delBtn.addEventListener('click', function () { handleDeleteTemplate(t); });
       actions.appendChild(renameBtn);
@@ -3681,14 +3858,14 @@
     var res = await WSTemplates.renameCustomTemplate(t.id, name);
     if (!res.ok) { setStatus(res.error, true); return; }
     renderTemplatesList();
-    setStatus('Renamed to "' + res.template.name + '".', false);
+    setStatus(WSI18n.t('msg.renamedTo', { name: res.template.name }), false);
   }
 
   async function handleDuplicateTemplate(t) {
     var res = await WSTemplates.duplicateCustomTemplate(t.id);
     if (!res.ok) { setStatus(res.error, true); return; }
     renderTemplatesList();
-    setStatus('Duplicated as "' + res.template.name + '".', false);
+    setStatus(WSI18n.t('msg.duplicatedAs', { name: res.template.name }), false);
   }
 
   function handleExportTemplate(t) {
@@ -3702,15 +3879,15 @@
   }
 
   async function handleDeleteTemplate(t) {
-    if (!confirm('Delete the template "' + t.name + '"? This cannot be undone.')) return;
+    if (!confirm(WSI18n.t('confirm.deleteTemplate', { name: t.name }))) return;
     var res = await WSTemplates.deleteCustomTemplate(t.id);
     if (!res.ok) { setStatus(res.error, true); return; }
     renderTemplatesList();
-    setStatus('Deleted "' + t.name + '".', false);
+    setStatus(WSI18n.t('msg.deletedName', { name: t.name }), false);
   }
 
   async function handleSaveCurrentAsTemplate() {
-    if (!state.columns.length) { setStatus('Add at least one column first.', true); return; }
+    if (!state.columns.length) { setStatus(WSI18n.t('msg.addColumnFirst'), true); return; }
     var suggested = hostname ? hostname.replace(/^www\./, '') + ' Template' : 'My Template';
     var name = prompt('Template Name:', suggested);
     if (name === null) return;
@@ -3726,7 +3903,7 @@
       transforms: activeTransforms
     });
     if (!res.ok) { setStatus(res.error, true); return; }
-    setStatus('Saved "' + res.template.name + '" as a template.', false);
+    setStatus(WSI18n.t('msg.savedAsTemplate', { name: res.template.name }), false);
     if (!els.templatesPanel.hidden) renderTemplatesList();
   }
 
@@ -3741,17 +3918,17 @@
     var reader = new FileReader();
     reader.onload = async function () {
       var res = WSTemplates.importTemplateFromJson(String(reader.result || ''));
-      if (!res.ok) { setStatus('Import failed: ' + res.error, true); return; }
+      if (!res.ok) { setStatus(WSI18n.t('msg.importFailed', { error: res.error }), true); return; }
       // Imported templates are ALWAYS treated as custom (never silently
       // marked builtin, whatever the file claims — see normalizeTemplate)
       // and go through the exact same name-collision-checked save path
       // a fresh "Save as Template" does.
       var saveRes = await WSTemplates.saveCustomTemplate(res.template);
-      if (!saveRes.ok) { setStatus('Import failed: ' + saveRes.error, true); return; }
+      if (!saveRes.ok) { setStatus(WSI18n.t('msg.importFailed', { error: saveRes.error }), true); return; }
       renderTemplatesList();
-      setStatus('Imported "' + saveRes.template.name + '".', false);
+      setStatus(WSI18n.t('msg.importedName', { name: saveRes.template.name }), false);
     };
-    reader.onerror = function () { setStatus('Could not read that file.', true); };
+    reader.onerror = function () { setStatus(WSI18n.t('msg.couldNotReadFile'), true); };
     reader.readAsText(file);
   }
 
@@ -3771,7 +3948,7 @@
       // matching needed, just show exactly what's in it.
       templatePreviewContext = { template: t, isDirect: true };
       els.tplPreviewNote.hidden = false;
-      els.tplPreviewNote.textContent = 'Applying this template will REPLACE your current columns and Run Mode settings with this template’s own (' + t.columns.length + ' column' + (t.columns.length === 1 ? '' : 's') + ').';
+      els.tplPreviewNote.textContent = WSI18n.t('templates.previewReplace', { count: t.columns.length });
       t.columns.forEach(function (c) {
         var row = document.createElement('div');
         row.className = 'ws-ad-field-row';
@@ -3808,10 +3985,10 @@
 
     if (blockedCount > 0) {
       els.tplPreviewNote.hidden = false;
-      els.tplPreviewNote.textContent = blockedCount + ' field' + (blockedCount === 1 ? '' : 's') + ' would need a fresh page structure and ' + (blockedCount === 1 ? 'was' : 'were') + ' skipped because you already have columns set up (use Reset Columns first to use ' + (blockedCount === 1 ? 'it' : 'them') + '). Matched fields below will be ADDED to your current columns.';
+      els.tplPreviewNote.textContent = WSI18n.t('templates.previewBlocked', { count: blockedCount });
     } else if (usable.length) {
       els.tplPreviewNote.hidden = false;
-      els.tplPreviewNote.textContent = 'Matched fields below will be ADDED to your current columns — nothing existing is removed.';
+      els.tplPreviewNote.textContent = WSI18n.t('templates.previewAdd');
     } else {
       els.tplPreviewNote.hidden = true;
     }
@@ -3851,7 +4028,7 @@
 
     if (matchResult.unmatched.length) {
       els.tplPreviewUnmatched.hidden = false;
-      els.tplPreviewUnmatched.textContent = 'Not found on this page: ' + matchResult.unmatched.join(', ') + ' — you can still add these manually afterward.';
+      els.tplPreviewUnmatched.textContent = WSI18n.t('templates.previewUnmatched', { names: matchResult.unmatched.join(', ') });
     } else {
       els.tplPreviewUnmatched.hidden = true;
     }
@@ -3917,14 +4094,14 @@
       invalidateTransformCache();
       renderTransformHistory();
       closeTemplatesPanel();
-      setStatus('Applied template "' + t.name + '".', false);
+      setStatus(WSI18n.t('msg.appliedTemplate', { name: t.name }), false);
       return;
     }
 
     var checkboxes = els.tplPreviewFields.querySelectorAll('input[type="checkbox"]');
     var toAdd = [];
     checkboxes.forEach(function (cb) { if (cb.checked) toAdd.push(ctx.usable[parseInt(cb.dataset.fieldIndex, 10)]); });
-    if (!toAdd.length) { setStatus('Select at least one field first.', true); return; }
+    if (!toAdd.length) { setStatus(WSI18n.t('msg.selectFieldFirst'), true); return; }
 
     var existingNames = {};
     state.columns.forEach(function (c) { existingNames[c.name.trim().toLowerCase()] = true; });
@@ -4069,7 +4246,7 @@
    * is completely mode-agnostic; it just resolves a stable selector for
    * whatever element gets clicked). */
   async function handleSelectNextButton() {
-    setStatus('Preparing selection mode…', false);
+    setStatus(WSI18n.t('msg.preparingSelection'), false);
     try {
       // Clear any stale prior pick so we can tell a fresh one apart.
       await sessionSet('ws_next_button_pick::' + hostname, null);
@@ -4079,7 +4256,7 @@
         ? 'Click the "Load More" / "Show More" button on the page (Esc to cancel).'
         : 'Click the "Next" / pagination control on the page (Esc to cancel).', false);
     } catch (e) {
-      setStatus("Couldn't start selection on this page.", true);
+      setStatus(WSI18n.t('msg.couldNotStartSelection'), true);
     }
   }
 
@@ -4090,7 +4267,7 @@
       pendingNextButtonConfig = { relativeSelector: pick.relativeSelector };
       await sessionSet(key, null); // consumed
       updateNextButtonStatusText();
-      setStatus('Button selected' + (pick.disabled ? ' (⚠ looked disabled at pick time — double-check).' : '.'), false);
+      setStatus(pick.disabled ? WSI18n.t('msg.buttonSelectedDisabled') : WSI18n.t('msg.buttonSelected'), false);
     }
   }
 
@@ -4102,21 +4279,21 @@
   // =====================================================================
 
   function paginationDetectionSummary(detection) {
-    if (!detection || !detection.detected) return 'No pagination confidently detected on this page.';
+    if (!detection || !detection.detected) return WSI18n.t('pagination.noneDetected');
     if (detection.detected === 'load-more' && detection.candidate) {
-      return 'Load More button: "' + (detection.candidate.previewText || detection.candidate.relativeSelector) + '"';
+      return WSI18n.t('pagination.loadMoreButton', { text: detection.candidate.previewText || detection.candidate.relativeSelector });
     }
     if (detection.detected === 'pagination' && detection.candidate) {
-      return 'Next button: "' + (detection.candidate.previewText || detection.candidate.relativeSelector) + '"';
+      return WSI18n.t('pagination.nextButton', { text: detection.candidate.previewText || detection.candidate.relativeSelector });
     }
     if (detection.detected === 'pagination' && detection.urlPattern) {
-      return 'URL pattern: ' + (detection.urlPattern.kind === 'path' ? '/' + detection.urlPattern.key + '/N' : '?' + detection.urlPattern.key + '=N');
+      return WSI18n.t('pagination.urlPatternSummary', { pattern: (detection.urlPattern.kind === 'path' ? '/' + detection.urlPattern.key + '/N' : '?' + detection.urlPattern.key + '=N') });
     }
-    return 'No pagination confidently detected on this page.';
+    return WSI18n.t('pagination.noneDetected');
   }
 
   async function handleDetectPagination() {
-    setStatus('Scanning the page for pagination…', false);
+    setStatus(WSI18n.t('msg.scanningPagination'), false);
     try {
       var res = await sendToContent({ type: 'RUN_PAGINATION_AUTO_DETECT' });
       lastPaginationDetection = (res && res.ok) ? res : null;
@@ -4124,7 +4301,7 @@
       lastPaginationDetection = null;
     }
     els.paginationDetectResult.hidden = false;
-    els.pdSummaryText.textContent = 'Detected: ' + paginationDetectionSummary(lastPaginationDetection);
+    els.pdSummaryText.textContent = WSI18n.t('pagination.detectedPrefix', { summary: paginationDetectionSummary(lastPaginationDetection) });
     var confidence = (lastPaginationDetection && lastPaginationDetection.candidate) ? 'high'
       : (lastPaginationDetection && lastPaginationDetection.urlPattern) ? lastPaginationDetection.urlPattern.confidence
       : null;
@@ -4162,7 +4339,7 @@
 
     onRunModeChanged();
     els.paginationDetectResult.hidden = true;
-    setStatus('Detected pagination applied — review the fields below, then Start when ready.', false);
+    setStatus(WSI18n.t('msg.paginationDetectedApplied'), false);
   }
 
   function handleDismissPaginationDetection() {
@@ -4181,7 +4358,7 @@
     var start = parseInt(els.urlPatternStart.value, 10);
     var step = parseInt(els.urlPatternStep.value, 10);
     if (!(start >= 0) || !(step >= 1)) {
-      setStatus('Enter a valid starting value and step for URL Pattern pagination.', true);
+      setStatus(WSI18n.t('msg.urlPatternInvalid'), true);
       return null;
     }
     return { kind: kind, key: key, style: kind === 'path' ? 'page' : (key === 'start' || key === 'offset' ? 'offset' : 'page'), start: start, step: step };
@@ -4218,7 +4395,7 @@
   async function handleStartRunInner() {
     var mode = getSelectedRunMode();
     if (mode === 'current-page') return;
-    if (!state.columns.length) { setStatus('Add at least one column first.', true); return; }
+    if (!state.columns.length) { setStatus(WSI18n.t('msg.addColumnFirst'), true); return; }
 
     var mpMethod = els.mpMethod ? els.mpMethod.value : 'nextButton';
     var urlPatternConfigToUse = null;
@@ -4242,7 +4419,7 @@
         maxScrolls: parseInt(els.asMaxScrolls.value, 10) || 100,
         noNewDataAttempts: 3
       };
-      setStatus('Starting Auto Scroll…', false);
+      setStatus(WSI18n.t('msg.startingAutoScroll'), false);
       try {
         await sendToContent({
           type: 'START_AUTO_SCROLL', tabId: tabId,
@@ -4250,7 +4427,7 @@
           dedupeKey: dedupeKey, limits: asLimits
         });
       } catch (e) {
-        setStatus("Couldn't start Auto Scroll on this page.", true);
+        setStatus(WSI18n.t('msg.couldNotStartAutoScroll'), true);
         return;
       }
       showRunProgressUI();
@@ -4266,7 +4443,7 @@
     // common case, but it's not assumed to be the ONLY case).
     var modeLabel = mode === 'load-more' ? 'Load More' : 'Multi-page';
     var origin = originPatternFor(hostname);
-    setStatus('Requesting permission for ' + hostname + '…', false);
+    setStatus(WSI18n.t('msg.requestingPermissionFor', { host: hostname }), false);
     var granted;
     try {
       granted = await chrome.permissions.request({ origins: [origin] });
@@ -4274,7 +4451,7 @@
       granted = false;
     }
     if (!granted) {
-      setStatus('Permission was declined — ' + modeLabel + ' needs access to this site to keep working after each page change.', true);
+      setStatus(WSI18n.t('msg.permissionDeclinedMode', { mode: modeLabel }), true);
       return;
     }
 
@@ -4296,7 +4473,7 @@
           runAt: 'document_idle', persistAcrossSessions: false
         });
       } catch (e2) {
-        setStatus('Could not set up ' + modeLabel + ' for this site. Try again.', true);
+        setStatus(WSI18n.t('msg.couldNotSetUpMode', { mode: modeLabel }), true);
         return;
       }
     }
@@ -4309,7 +4486,7 @@
         delayMs: parseInt(els.lmDelayMs.value, 10) || 0,
         retryCount: parseInt(els.lmRetryCount.value, 10) || 0
       };
-      setStatus('Starting Load More…', false);
+      setStatus(WSI18n.t('msg.startingLoadMore'), false);
       try {
         await sendToContent({
           type: 'START_LOAD_MORE', tabId: tabId,
@@ -4317,7 +4494,7 @@
           dedupeKey: dedupeKey, limits: lmLimits, nextButtonConfig: pendingNextButtonConfig
         });
       } catch (e) {
-        setStatus("Couldn't start Load More on this page.", true);
+        setStatus(WSI18n.t('msg.couldNotStartLoadMore'), true);
         return;
       }
       showRunProgressUI();
@@ -4331,7 +4508,7 @@
       retryCount: parseInt(els.mpRetryCount.value, 10) || 0
     };
 
-    setStatus('Starting Multi-page…', false);
+    setStatus(WSI18n.t('msg.startingMultiPage'), false);
     try {
       await sendToContent({
         type: 'START_MULTI_PAGE', tabId: tabId,
@@ -4341,7 +4518,7 @@
         paginationMethod: mpMethod, urlPatternConfig: urlPatternConfigToUse
       });
     } catch (e) {
-      setStatus("Couldn't start Multi-page on this page.", true);
+      setStatus(WSI18n.t('msg.couldNotStartMultiPage'), true);
       return;
     }
     showRunProgressUI();
@@ -4415,7 +4592,7 @@
     if (!runState) { showRunSetupUI(); return; }
 
     showRunProgressUI();
-    els.runStatusBadge.textContent = runState.status.toUpperCase();
+    els.runStatusBadge.textContent = localizedStatusLabel(runState.status);
     els.runStatusBadge.className = 'ws-status-badge ws-status-' + runState.status;
 
     var line;
@@ -4451,7 +4628,7 @@
   }
 
   async function handleStopRun() {
-    setStatus('Stopping…', false);
+    setStatus(WSI18n.t('msg.stopping'), false);
     try { await sendToContent({ type: 'STOP_RUN' }); } catch (e) { /* fall through to the direct-write safety net below */ }
     // Defensive fallback: guarantees Stop takes effect (preventing any
     // future bootstrap-resume) even if the content script isn't currently
@@ -4470,7 +4647,7 @@
    * like Stop"). Same delivery mechanics/defensive fallback as Stop
    * above, writing 'paused' instead of 'stopped'. */
   async function handlePauseRun() {
-    setStatus('Pausing…', false);
+    setStatus(WSI18n.t('msg.pausing'), false);
     try { await sendToContent({ type: 'PAUSE_RUN' }); } catch (e) { /* fall through to the direct-write safety net below */ }
     var rs = await sessionGet(runKey());
     if (rs && rs.status !== 'paused') {
@@ -4483,12 +4660,12 @@
   }
 
   async function handleResumeRun() {
-    setStatus('Resuming…', false);
+    setStatus(WSI18n.t('msg.resuming'), false);
     try {
       var res = await sendToContent({ type: 'RESUME_RUN' });
       if (!res || !res.ok) throw new Error(res && res.error);
     } catch (e) {
-      setStatus("Couldn't resume — reopen this page and try again.", true);
+      setStatus(WSI18n.t('msg.couldNotResume'), true);
     }
   }
 
@@ -4578,19 +4755,19 @@
       actions.className = 'ws-scraper-actions';
 
       var runBtn = document.createElement('button');
-      runBtn.textContent = 'Run';
+      runBtn.textContent = WSI18n.t('action.run');
       runBtn.addEventListener('click', function () { handleRunScraper(scraper); });
 
       var loadBtn = document.createElement('button');
-      loadBtn.textContent = 'Load';
+      loadBtn.textContent = WSI18n.t('action.load');
       loadBtn.addEventListener('click', function () { handleLoadScraper(scraper); });
 
       var renameBtn = document.createElement('button');
-      renameBtn.textContent = 'Rename';
+      renameBtn.textContent = WSI18n.t('action.rename');
       renameBtn.addEventListener('click', function () { handleRenameScraper(scraper); });
 
       var deleteBtn = document.createElement('button');
-      deleteBtn.textContent = 'Delete';
+      deleteBtn.textContent = WSI18n.t('action.delete');
       deleteBtn.className = 'ws-scraper-danger';
       deleteBtn.addEventListener('click', function () { handleDeleteScraper(scraper); });
 
@@ -4618,10 +4795,10 @@
     footer.className = 'ws-scraper-snapshot-row';
     var note = document.createElement('span');
     note.className = 'ws-scraper-snapshot-note';
-    note.textContent = 'Snapshots: ' + count + '/' + WSSnapshots.DEFAULT_RETENTION_PER_GROUP;
+    note.textContent = WSI18n.t('snapshots.summary', { count: count, max: WSSnapshots.DEFAULT_RETENTION_PER_GROUP });
     var manageBtn = document.createElement('button');
     manageBtn.className = 'ws-scraper-snapshot-manage';
-    manageBtn.textContent = 'Manage';
+    manageBtn.textContent = WSI18n.t('snapshots.manageBtn');
     footer.appendChild(note);
     footer.appendChild(manageBtn);
     li.appendChild(footer);
@@ -4634,7 +4811,7 @@
     manageBtn.addEventListener('click', async function () {
       var willShow = list.hidden;
       list.hidden = !willShow;
-      manageBtn.textContent = willShow ? 'Hide' : 'Manage';
+      manageBtn.textContent = willShow ? WSI18n.t('action.hide') : WSI18n.t('snapshots.manageBtn');
       if (!willShow) return;
       var snaps = await WSSnapshots.listSnapshots({ scraperId: scraper.id });
       list.innerHTML = '';
@@ -4642,9 +4819,9 @@
         var row = document.createElement('li');
         row.className = 'ws-snapshot-manage-row';
         var label = document.createElement('span');
-        label.textContent = formatSnapshotDate(snap.createdAt) + ' — ' + snap.rowCount + ' rows';
+        label.textContent = WSI18n.t('snapshots.rowLabel', { date: formatSnapshotDate(snap.createdAt), count: snap.rowCount });
         var delBtn = document.createElement('button');
-        delBtn.textContent = 'Delete';
+        delBtn.textContent = WSI18n.t('action.delete');
         delBtn.addEventListener('click', async function () {
           await WSSnapshots.deleteSnapshot(snap.id);
           await renderScrapers();
@@ -4776,13 +4953,13 @@
   async function handleLoadScraper(scraper) {
     if (!confirmIfPageMismatch(scraper)) return;
     await applyLoadedScraper(scraper);
-    setStatus('Loaded "' + scraper.name + '" (' + scraper.columns.length + ' columns).', false);
+    setStatus(WSI18n.t('msg.loadedScraperColumns', { name: scraper.name, count: scraper.columns.length }), false);
   }
 
   async function handleRunScraper(scraper) {
     if (!confirmIfPageMismatch(scraper)) return;
     await applyLoadedScraper(scraper);
-    setStatus('Running "' + scraper.name + '"…', false);
+    setStatus(WSI18n.t('msg.runningScraper', { name: scraper.name }), false);
     // Respects whatever run mode was saved with the recipe (V1.3) — a
     // scraper saved while set to Auto Scroll/Multi-page starts that mode
     // directly; a plain (or V1.2-era, mode-less) scraper just Previews,
@@ -4803,7 +4980,7 @@
     if (loadedScraperId === scraper.id) loadedScraperName = res.scraper.name;
     await renderScrapers();
     updateScraperButtonsVisibility();
-    setStatus('Renamed to "' + res.scraper.name + '".', false);
+    setStatus(WSI18n.t('msg.renamedTo', { name: res.scraper.name }), false);
   }
 
   /** V1.13.1 spec #6: the confirmation text below is written to match
@@ -4825,14 +5002,14 @@
    *     chrome.storage.local, never chrome.downloads).
    */
   function buildDeleteScraperConfirmText(scraper) {
-    var lines = ['Delete "' + scraper.name + '"?', ''];
-    lines.push('This removes the saved scraper configuration, including its monitoring schedule, notification preference, and monitoring run history.');
+    var lines = [WSI18n.t('confirm.deleteScraperTitle', { name: scraper.name }), ''];
+    lines.push(WSI18n.t('confirm.deleteScraperBody1'));
     lines.push('');
-    lines.push('Saved snapshots for this scraper are kept in storage but will no longer be reachable from the app.');
+    lines.push(WSI18n.t('confirm.deleteScraperBody2'));
     lines.push('');
-    lines.push('Your current Results/Research data and any already-exported or downloaded files are not affected.');
+    lines.push(WSI18n.t('confirm.deleteScraperBody3'));
     lines.push('');
-    lines.push("This can't be undone.");
+    lines.push(WSI18n.t('confirm.deleteScraperBody4'));
     return lines.join('\n');
   }
 
@@ -4854,7 +5031,7 @@
     }
     await renderScrapers();
     await renderMonitoringSection();
-    setStatus('Deleted "' + scraper.name + '".', false);
+    setStatus(WSI18n.t('msg.deletedName', { name: scraper.name }), false);
   }
 
   // =====================================================================
@@ -4867,7 +5044,13 @@
   // whatever background.js has written back to the Saved Scraper record.
   // =====================================================================
 
-  var MONITOR_INTERVAL_LABELS = { 60: 'Hourly', 360: 'Every 6 hours', 720: 'Every 12 hours', 1440: 'Daily' };
+  function MONITOR_INTERVAL_LABELS_FN(mins) {
+    if (mins === 60) return WSI18n.t('monitor.hourly');
+    if (mins === 360) return WSI18n.t('monitor.every6h');
+    if (mins === 720) return WSI18n.t('monitor.every12h');
+    if (mins === 1440) return WSI18n.t('monitor.daily');
+    return null;
+  }
   var MONITOR_STATUS_BADGE_CLASS = { running: 'running', success: 'completed', error: 'error' };
 
   function formatMonitorTimestamp(ts) {
@@ -4895,7 +5078,9 @@
   // success > never; within a group, newest lastRunAt first.
   // =====================================================================
   var MONITOR_CARD_STATUS_PRIORITY = { error: 0, changed: 1, success: 2, never: 3 };
-  var MONITOR_CARD_STATUS_LABEL = { error: 'ERROR', changed: 'CHANGED', success: 'SUCCESS', never: 'NEVER RUN' };
+  function MONITOR_CARD_STATUS_LABEL_FN(status) {
+    return { error: WSI18n.t('monitor.statusError'), changed: WSI18n.t('monitor.statusChanged'), success: WSI18n.t('monitor.statusSuccess'), never: WSI18n.t('monitor.statusNeverRun') }[status];
+  }
   var MONITOR_CARD_BADGE_CLASS = { error: 'error', changed: 'changed', success: 'completed', never: 'never' };
 
   function computeMonitorCardStatus(monitoring) {
@@ -4980,8 +5165,7 @@
     els.monitoringFilters.hidden = scrapers.length === 0;
     if (scrapers.length > 0) {
       var summary = computeMonitorSummary(scrapers);
-      els.monitoringSummary.textContent = 'Monitoring Summary\n' +
-        summary.active + ' Active | ' + summary.success + ' Success | ' + summary.changed + ' Changed | ' + summary.errors + ' Errors';
+      els.monitoringSummary.textContent = WSI18n.t('monitor.summaryHeading') + '\n' + WSI18n.t('monitor.summaryLine', { active: summary.active, success: summary.success, changed: summary.changed, errors: summary.errors });
       renderMonitorFilterButtons();
     }
 
@@ -5017,13 +5201,13 @@
       if (monitoring.enabled && monitoring.lastRunStatus === 'running') {
         var runningBadge = document.createElement('span');
         runningBadge.className = 'ws-status-badge ws-status-running';
-        runningBadge.textContent = 'RUNNING';
+        runningBadge.textContent = WSI18n.t('monitor.statusRunning');
         head.appendChild(runningBadge);
       } else {
         var cardStatus = computeMonitorCardStatus(monitoring);
         var badge = document.createElement('span');
         badge.className = 'ws-status-badge ws-status-' + MONITOR_CARD_BADGE_CLASS[cardStatus];
-        badge.textContent = MONITOR_CARD_STATUS_LABEL[cardStatus];
+        badge.textContent = MONITOR_CARD_STATUS_LABEL_FN(cardStatus);
         head.appendChild(badge);
       }
       li.appendChild(head);
@@ -5039,7 +5223,7 @@
       if (typeof cardStatus !== 'undefined' && cardStatus === 'never') {
         var neverRunNote = document.createElement('p');
         neverRunNote.className = 'ws-monitor-never-run-note';
-        neverRunNote.textContent = 'No monitoring snapshot yet.';
+        neverRunNote.textContent = WSI18n.t('monitor.noSnapshotYet');
         li.appendChild(neverRunNote);
       }
 
@@ -5057,18 +5241,18 @@
         statusLine.className = 'ws-monitor-status-line';
         var lines = [];
         if (monitoring.enabled) {
-          lines.push(MONITOR_INTERVAL_LABELS[monitoring.intervalMinutes] || ('Every ' + monitoring.intervalMinutes + ' min'));
+          lines.push(MONITOR_INTERVAL_LABELS_FN(monitoring.intervalMinutes) || WSI18n.t('monitor.everyNMin', { n: monitoring.intervalMinutes }));
         } else {
-          lines.push('Monitoring disabled');
+          lines.push(WSI18n.t('monitor.disabled'));
         }
         if (monitoring.lastRunStatus) {
-          lines.push('Last run: ' + formatMonitorTimestamp(monitoring.lastRunAt) + (monitoring.lastRunStatus === 'running' ? ' (running now…)' : ''));
+          lines.push(WSI18n.t('monitor.lastRun', { date: formatMonitorTimestamp(monitoring.lastRunAt) }) + (monitoring.lastRunStatus === 'running' ? WSI18n.t('monitor.runningNowSuffix') : ''));
           if (monitoring.lastRunStatus === 'success' && monitoring.lastRunSummary) lines.push(monitoring.lastRunSummary);
           if (monitoring.lastRunStatus === 'error' && monitoring.lastError) lines.push('⚠ ' + monitoring.lastError);
         } else if (monitoring.enabled) {
-          lines.push('No runs yet.');
+          lines.push(WSI18n.t('monitor.noRunsYet'));
         }
-        if (monitoring.enabled) lines.push('Next run: ' + formatMonitorTimestamp(monitoring.nextRunAt));
+        if (monitoring.enabled) lines.push(WSI18n.t('monitor.nextRun', { date: formatMonitorTimestamp(monitoring.nextRunAt) }));
         statusLine.textContent = lines.join('\n');
         li.appendChild(statusLine);
       }
@@ -5081,7 +5265,7 @@
         WSRecipes.MONITOR_INTERVALS.forEach(function (mins) {
           var opt = document.createElement('option');
           opt.value = String(mins);
-          opt.textContent = MONITOR_INTERVAL_LABELS[mins] || (mins + ' min');
+          opt.textContent = MONITOR_INTERVAL_LABELS_FN(mins) || WSI18n.t('monitor.everyNMin', { n: mins });
           select.appendChild(opt);
         });
         var notifyCheckbox = document.createElement('input');
@@ -5091,9 +5275,9 @@
         notifyLabel.className = 'ws-monitor-notify-label';
         notifyLabel.appendChild(notifyCheckbox);
         notifyLabel.appendChild(document.createTextNode(' 🔔'));
-        notifyLabel.title = 'Notify me when this scraper finds changes or errors';
+        notifyLabel.title = WSI18n.t('monitor.notifyTitle');
         var enableBtn = document.createElement('button');
-        enableBtn.textContent = 'Enable';
+        enableBtn.textContent = WSI18n.t('monitor.enable');
         enableBtn.className = 'ws-monitor-btn-primary'; // the one obvious primary action for a not-yet-monitored scraper (spec #7)
         enableBtn.addEventListener('click', function () {
           handleEnableMonitoring(scraper, parseInt(select.value, 10), notifyCheckbox.checked);
@@ -5105,7 +5289,7 @@
         li.appendChild(controls);
       } else {
         var runNowBtn = document.createElement('button');
-        runNowBtn.textContent = 'Run Now';
+        runNowBtn.textContent = WSI18n.t('monitor.runNow');
         runNowBtn.className = 'ws-monitor-btn-primary'; // the one obvious primary action on an enabled card (spec #7) — Disable stays secondary
         runNowBtn.disabled = monitoring.lastRunStatus === 'running';
         // V1.15: Monitoring is fully available to every user and never
@@ -5113,7 +5297,7 @@
         // user-initiated Preview/Start Run scraping) — no gating here at all.
         runNowBtn.addEventListener('click', function () { handleRunMonitoredNow(scraper); });
         var disableBtn = document.createElement('button');
-        disableBtn.textContent = 'Disable';
+        disableBtn.textContent = WSI18n.t('monitor.disable');
         disableBtn.addEventListener('click', function () { handleDisableMonitoring(scraper); });
         var notifyToggle = document.createElement('input');
         notifyToggle.type = 'checkbox';
@@ -5122,7 +5306,7 @@
         notifyToggleLabel.className = 'ws-monitor-notify-label';
         notifyToggleLabel.appendChild(notifyToggle);
         notifyToggleLabel.appendChild(document.createTextNode(' 🔔'));
-        notifyToggleLabel.title = 'Notify me when this scraper finds changes or errors';
+        notifyToggleLabel.title = WSI18n.t('monitor.notifyTitle');
         notifyToggle.addEventListener('change', function () { handleToggleNotify(scraper, notifyToggle.checked); });
         controls.appendChild(runNowBtn);
         controls.appendChild(disableBtn);
@@ -5144,7 +5328,7 @@
   function appendHistoryButtonIfAny(controls, scraper, monitoring) {
     if (!monitoring.history || !monitoring.history.length) return;
     var historyBtn = document.createElement('button');
-    historyBtn.textContent = 'History';
+    historyBtn.textContent = WSI18n.t('monitor.history');
     historyBtn.addEventListener('click', function () {
       openHistoryScraperId = (openHistoryScraperId === scraper.id) ? null : scraper.id;
       renderMonitoringSection();
@@ -5171,7 +5355,7 @@
       dateSpan.textContent = formatMonitorTimestamp(entry.at);
       var badge = document.createElement('span');
       badge.className = 'ws-status-badge ws-status-' + (MONITOR_STATUS_BADGE_CLASS[entry.status] || entry.status);
-      badge.textContent = (entry.status || '').toUpperCase();
+      badge.textContent = localizedStatusLabel(entry.status);
       head.appendChild(dateSpan);
       head.appendChild(badge);
       row.appendChild(head);
@@ -5179,9 +5363,9 @@
       var detail = document.createElement('div');
       detail.className = 'ws-monitor-history-detail';
       if (entry.status === 'success') {
-        detail.textContent = entry.totalRows + ' rows | +' + entry.newCount + ' new | -' + entry.removedCount + ' removed | ~' + entry.changedCount + ' changed';
+        detail.textContent = WSI18n.t('monitor.historyDetail', { count: entry.totalRows, rows: entry.totalRows, added: entry.newCount, removed: entry.removedCount, changed: entry.changedCount });
       } else {
-        detail.textContent = '⚠ ' + (entry.error || 'Unknown error');
+        detail.textContent = '⚠ ' + (entry.error || WSI18n.t('monitor.unknownError'));
       }
       row.appendChild(detail);
 
@@ -5191,7 +5375,7 @@
 
     var clearBtn = document.createElement('button');
     clearBtn.className = 'ws-chip-btn ws-chip-btn-warn';
-    clearBtn.textContent = 'Clear History';
+    clearBtn.textContent = WSI18n.t('monitor.clearHistory');
     clearBtn.addEventListener('click', function () { handleClearMonitoringHistory(scraper); });
     panel.appendChild(clearBtn);
 
@@ -5203,12 +5387,12 @@
    * notification preference are all untouched (recipes.js's
    * clearMonitoringHistory structurally can't touch them). */
   async function handleClearMonitoringHistory(scraper) {
-    if (!confirm('Clear monitoring history for "' + scraper.name + '"? This only removes the run history list — snapshots, the saved scraper configuration, and the current schedule are kept.')) return;
+    if (!confirm(WSI18n.t('confirm.clearMonitoringHistory', { name: scraper.name }))) return;
     var res = await sendToBackground({ type: 'CLEAR_MONITORING_HISTORY', scraperId: scraper.id });
-    if (!res || !res.ok) { setStatus('Could not clear history.', true); return; }
+    if (!res || !res.ok) { setStatus(WSI18n.t('msg.couldNotClearHistory'), true); return; }
     openHistoryScraperId = null;
     await renderMonitoringSection();
-    setStatus('History cleared for "' + scraper.name + '".', false);
+    setStatus(WSI18n.t('msg.historyClearedFor', { name: scraper.name }), false);
   }
 
   /** Enabling requires a real, persistent host permission for this
@@ -5220,17 +5404,17 @@
    * platform-constraint explanation. */
   async function handleEnableMonitoring(scraper, intervalMinutes, notifyOnChanges) {
     var origin = originPatternFor(scraper.hostname);
-    setStatus('Requesting permission for ' + scraper.hostname + '…', false);
+    setStatus(WSI18n.t('msg.requestingPermissionFor', { host: scraper.hostname }), false);
     var granted;
     try { granted = await chrome.permissions.request({ origins: [origin] }); } catch (e) { granted = false; }
     if (!granted) {
-      setStatus('Permission was declined — Monitoring needs access to revisit this site automatically.', true);
+      setStatus(WSI18n.t('msg.permissionDeclinedMonitoring'), true);
       return;
     }
     var res = await sendToBackground({ type: 'SET_MONITORING', scraperId: scraper.id, enabled: true, intervalMinutes: intervalMinutes, notifyOnChanges: notifyOnChanges });
-    if (!res || !res.ok) { setStatus('Could not enable monitoring.', true); return; }
+    if (!res || !res.ok) { setStatus(WSI18n.t('msg.couldNotEnableMonitoring'), true); return; }
     await renderMonitoringSection();
-    setStatus('Monitoring enabled for "' + scraper.name + '".', false, 'success');
+    setStatus(WSI18n.t('msg.monitoringEnabledFor', { name: scraper.name }), false, 'success');
   }
 
   /** Deliberately does NOT revoke the host permission it was granted
@@ -5239,9 +5423,9 @@
    * same permission again. */
   async function handleDisableMonitoring(scraper) {
     var res = await sendToBackground({ type: 'SET_MONITORING', scraperId: scraper.id, enabled: false });
-    if (!res || !res.ok) { setStatus('Could not disable monitoring.', true); return; }
+    if (!res || !res.ok) { setStatus(WSI18n.t('msg.couldNotDisableMonitoring'), true); return; }
     await renderMonitoringSection();
-    setStatus('Monitoring disabled for "' + scraper.name + '".', false);
+    setStatus(WSI18n.t('msg.monitoringDisabledFor', { name: scraper.name }), false);
   }
 
   /** V1.9: flips the notify-on-changes toggle for an already-enabled
@@ -5253,7 +5437,7 @@
    * preference. SET_NOTIFY only ever touches notifyOnChanges. */
   async function handleToggleNotify(scraper, notifyOnChanges) {
     var res = await sendToBackground({ type: 'SET_NOTIFY', scraperId: scraper.id, notifyOnChanges: notifyOnChanges });
-    if (!res || !res.ok) { setStatus('Could not update notification setting.', true); return; }
+    if (!res || !res.ok) { setStatus(WSI18n.t('msg.couldNotUpdateNotification'), true); return; }
     await renderMonitoringSection();
     setStatus(notifyOnChanges ? 'Notifications enabled for "' + scraper.name + '".' : 'Notifications disabled for "' + scraper.name + '".', false);
   }
@@ -5262,7 +5446,7 @@
    * progress is reflected live via the chrome.storage.onChanged listener
    * below rather than blocking this click. */
   async function handleRunMonitoredNow(scraper) {
-    setStatus('Running "' + scraper.name + '" now…', false);
+    setStatus(WSI18n.t('msg.runningScraperNow', { name: scraper.name }), false);
     await sendToBackground({ type: 'RUN_MONITORED_NOW', scraperId: scraper.id });
     await renderMonitoringSection();
   }
@@ -5368,7 +5552,7 @@
   }
 
   async function handleSaveScraper() {
-    if (!state.columns.length) { setStatus('Add at least one column first.', true); return; }
+    if (!state.columns.length) { setStatus(WSI18n.t('msg.addColumnFirst'), true); return; }
     // V1.15: no more saved-scraper cap of any kind — Saved Scrapers were
     // never part of the 10-run trial to begin with.
     var suggested = hostname ? hostname.replace(/^www\./, '') : 'My Scraper';
@@ -5394,7 +5578,7 @@
     updateScraperButtonsVisibility();
     await renderScrapers();
     await renderMonitoringSection();
-    setStatus('Saved "' + res.scraper.name + '".', false);
+    setStatus(WSI18n.t('msg.savedName', { name: res.scraper.name }), false);
   }
 
   async function handleUpdateScraper() {
@@ -5412,7 +5596,7 @@
     if (!res.ok) { setStatus(res.error, true); return; }
     await renderScrapers();
     await renderMonitoringSection();
-    setStatus('Updated "' + res.scraper.name + '".', false);
+    setStatus(WSI18n.t('msg.updatedName', { name: res.scraper.name }), false);
   }
 
   // =====================================================================
@@ -5507,7 +5691,7 @@
       upBtn.type = 'button';
       upBtn.className = 'ws-transform-reorder';
       upBtn.textContent = '▲';
-      upBtn.title = 'Move up'; upBtn.setAttribute('aria-label', 'Move up');
+      upBtn.title = WSI18n.t('action.moveUp'); upBtn.setAttribute('aria-label', WSI18n.t('action.moveUp'));
       upBtn.disabled = idx === 0;
       upBtn.addEventListener('click', function () { handleMoveTransformStep(t.id, -1); });
 
@@ -5515,13 +5699,13 @@
       downBtn.type = 'button';
       downBtn.className = 'ws-transform-reorder';
       downBtn.textContent = '▼';
-      downBtn.title = 'Move down'; downBtn.setAttribute('aria-label', 'Move down');
+      downBtn.title = WSI18n.t('action.moveDown'); downBtn.setAttribute('aria-label', WSI18n.t('action.moveDown'));
       downBtn.disabled = idx === activeTransforms.length - 1;
       downBtn.addEventListener('click', function () { handleMoveTransformStep(t.id, 1); });
 
       var removeBtn = document.createElement('button');
       removeBtn.type = 'button';
-      removeBtn.textContent = 'Remove';
+      removeBtn.textContent = WSI18n.t('action.remove');
       removeBtn.addEventListener('click', function () { handleRemoveTransformStep(t.id); });
 
       li.appendChild(enableCb);
@@ -5568,7 +5752,7 @@
     invalidateTransformCache();
     renderTransformHistory();
     renderResults();
-    setStatus('Transform step moved.', false);
+    setStatus(WSI18n.t('msg.transformStepMoved'), false);
   }
 
   /** The "add a transform" form's Column select (and Combine's source
@@ -5589,7 +5773,7 @@
     renderResults();
     refreshTransformFormColumns();
     updateTransformPreview();
-    setStatus('Transform step removed.', false);
+    setStatus(WSI18n.t('msg.transformStepRemoved'), false);
   }
 
   function handleUndoLastTransform() {
@@ -5600,19 +5784,19 @@
     renderResults();
     refreshTransformFormColumns();
     updateTransformPreview();
-    setStatus('Undid the last transform.', false);
+    setStatus(WSI18n.t('msg.undidLastTransform'), false);
   }
 
   function handleResetTransforms() {
     if (!activeTransforms.length) return;
-    if (!confirm('Remove all transforms and return to the raw scraped data?')) return;
+    if (!confirm(WSI18n.t('confirm.removeAllTransforms'))) return;
     activeTransforms = [];
     invalidateTransformCache();
     renderTransformHistory();
     renderResults();
     refreshTransformFormColumns();
     updateTransformPreview();
-    setStatus('All transforms reset — showing raw scraped data.', false);
+    setStatus(WSI18n.t('msg.allTransformsReset'), false);
   }
 
   function populateTransformColumnSelect() {
@@ -5727,7 +5911,7 @@
     }
 
     var column = els.tfColumnSelect.value;
-    if (!column) { setStatus('Select a column first.', true); return null; }
+    if (!column) { setStatus(WSI18n.t('msg.selectColumnFirst'), true); return null; }
 
     var options = {};
     switch (type) {
@@ -5857,17 +6041,17 @@
       return;
     }
     if (!res.examples.length) {
-      els.tfPreviewText.textContent = 'No populated example values to preview yet.';
+      els.tfPreviewText.textContent = WSI18n.t('transform.previewEmpty');
       return;
     }
-    var lines = ['Before → After', ''];
+    var lines = [WSI18n.t('transform.beforeAfter'), ''];
     res.examples.forEach(function (ex) { lines.push(ex.before + '  →  ' + ex.after); });
-    lines.push('', 'Showing ' + res.examples.length + ' example' + (res.examples.length === 1 ? '' : 's') + '.');
+    lines.push('', WSI18n.t('transform.showingExamples', { count: res.examples.length }));
     els.tfPreviewText.textContent = lines.join('\n');
   }
 
   function handleApplyTransform() {
-    if (!rawRows.length) { setStatus('Run Preview first — there’s nothing to transform yet.', true); return; }
+    if (!rawRows.length) { setStatus(WSI18n.t('msg.runPreviewFirstTransform'), true); return; }
     var candidate = buildCandidateTransform();
     if (!candidate) return;
 
@@ -5889,7 +6073,7 @@
     renderResults();
     refreshTransformFormColumns();
     updateTransformPreview();
-    setStatus('Transform applied.', false);
+    setStatus(WSI18n.t('msg.transformApplied'), false);
   }
 
   /** V1.23 spec #25 Transform Presets — a ready-made SEQUENCE of ordinary
@@ -5899,9 +6083,9 @@
    * entry in the history list afterward — a preset never becomes a
    * locked/special kind of step. */
   function handleAddPreset() {
-    if (!rawRows.length) { setStatus('Run Preview first — there’s nothing to transform yet.', true); return; }
+    if (!rawRows.length) { setStatus(WSI18n.t('msg.runPreviewFirstTransform'), true); return; }
     var column = els.tfColumnSelect.value;
-    if (!column) { setStatus('Select a column first.', true); return; }
+    if (!column) { setStatus(WSI18n.t('msg.selectColumnFirst'), true); return; }
     var preset = WSTransforms.PRESETS[els.tfPresetSelect.value];
     if (!preset) return;
 
@@ -5924,7 +6108,7 @@
     renderResults();
     refreshTransformFormColumns();
     updateTransformPreview();
-    setStatus('Added "' + preset.label + '" preset (' + newSteps.length + ' step' + (newSteps.length === 1 ? '' : 's') + ').', false);
+    setStatus(WSI18n.t('msg.addedPreset', { label: preset.label, count: newSteps.length }), false);
   }
 
   function handleCancelTransformPanel() {
@@ -6046,7 +6230,7 @@
     try {
       result = WSTransforms.applyTransforms(cleanedRows, baseColumns, activeTransforms, { baseUrl: pageUrl });
     } catch (e) {
-      setStatus('Transform error — showing untransformed data: ' + friendlyErrorMessage(e, 'an unexpected error.'), true);
+      setStatus(WSI18n.t('msg.transformError', { error: friendlyErrorMessage(e, 'an unexpected error.') }), true);
       result = { rows: cleanedRows, columns: baseColumns };
     }
     transformResultCache = result;
@@ -6138,12 +6322,12 @@
     if (result.error) setStatus(result.error, true);
 
     var rows = result.rows;
-    els.rowCount.textContent = '(' + rows.length +
-      (rows.length !== rawRows.length ? ' of ' + rawRows.length : '') +
-      ' row' + (rawRows.length === 1 ? '' : 's') + ')';
+    els.rowCount.textContent = rows.length !== rawRows.length
+      ? WSI18n.t('preview.rowCountFiltered', { count: rawRows.length, shown: rows.length })
+      : WSI18n.t('preview.rowCountTotal', { count: rawRows.length });
     buildPreviewTable(result.columns, rows, PREVIEW_LIMIT);
     els.previewNote.textContent = rows.length > PREVIEW_LIMIT
-      ? 'Showing first ' + PREVIEW_LIMIT.toLocaleString() + ' of ' + rows.length.toLocaleString() + ' rows.'
+      ? WSI18n.t('preview.truncatedNote', { limit: PREVIEW_LIMIT.toLocaleString(), total: rows.length.toLocaleString() })
       : '';
     els.anomalyLegend.hidden = !rows.some(function (r) { return r._wsAnomaly; });
     els.resetResultsBtn.hidden = !(activeFilter || activeDedupe || activeSort);
@@ -6186,11 +6370,11 @@
 
   async function handlePreviewInner() {
     if (!state.columns.length) {
-      setStatus('Add at least one column first.', true);
+      setStatus(WSI18n.t('msg.addColumnFirst'), true);
       return;
     }
     if (!(await trialAllowsNewRun())) { showTrialCompleteModal(); return; }
-    setStatus('Scanning page…', false, 'running');
+    setStatus(WSI18n.t('msg.scanningPage'), false, 'running');
     try {
       var res = await sendToContent({ type: 'RUN_EXTRACTION' });
       if (!res || !res.ok) throw new Error('extraction-failed');
@@ -6222,12 +6406,12 @@
       els.previewSection.hidden = false;
       renderResults();
       if (!rawRows.length) {
-        setStatus('No matching elements found on this page — the saved selectors may no longer match this page’s current layout.', true);
+        setStatus(WSI18n.t('msg.noMatchingElements'), true);
       } else {
         setStatus('');
       }
     } catch (e) {
-      setStatus("Couldn't read data from this page.", true);
+      setStatus(WSI18n.t('msg.couldNotReadPageData'), true);
     }
   }
 
@@ -6236,7 +6420,7 @@
     activeDedupe = null;
     activeSort = null;
     renderResults();
-    setStatus('Results reset to the raw scraped data.', false);
+    setStatus(WSI18n.t('msg.resultsReset'), false);
   }
 
   // ---- Filter panel ----
@@ -6249,7 +6433,7 @@
     if (includeEntireRow) {
       var o = document.createElement('option');
       o.value = 'entire-row';
-      o.textContent = 'Entire Row';
+      o.textContent = WSI18n.t('column.entireRow');
       select.appendChild(o);
     }
     effectiveColumns().forEach(function (c) {
@@ -6302,14 +6486,14 @@
     if (res.error) { setStatus(res.error, true); return; }
     activeFilter = candidate;
     renderResults();
-    setStatus('Filter applied.', false);
+    setStatus(WSI18n.t('msg.filterApplied'), false);
   }
 
   function handleClearFilter() {
     activeFilter = null;
     els.filterValue.value = '';
     renderResults();
-    setStatus('Filter cleared.', false);
+    setStatus(WSI18n.t('msg.filterCleared'), false);
   }
 
   // ---- Sort panel ----
@@ -6336,13 +6520,13 @@
     var direction = document.querySelector('input[name="sort-dir"]:checked').value;
     activeSort = { columnId: els.sortColumn.value, direction: direction };
     renderResults();
-    setStatus('Sort applied.', false);
+    setStatus(WSI18n.t('msg.sortApplied'), false);
   }
 
   function handleClearSort() {
     activeSort = null;
     renderResults();
-    setStatus('Sort cleared.', false);
+    setStatus(WSI18n.t('msg.sortCleared'), false);
   }
 
   // ---- Remove duplicates panel ----
@@ -6415,10 +6599,10 @@
    * keyed by (which may differ from state.columns once Split/Combine are
    * active) — export/copy/download must always use these together. */
   function getExportRows() {
-    if (!state.columns.length) { setStatus('Add at least one column first.', true); return null; }
+    if (!state.columns.length) { setStatus(WSI18n.t('msg.addColumnFirst'), true); return null; }
     var result = computeDisplayRows();
     if (result.error) { setStatus(result.error, true); return null; }
-    if (!result.rows.length) { setStatus('No rows to export.', true); return null; }
+    if (!result.rows.length) { setStatus(WSI18n.t('msg.noRowsToExport'), true); return null; }
     return { rows: result.rows, columns: result.columns };
   }
 
@@ -6470,7 +6654,7 @@
 
     if (opts.selectedColumnIds) {
       columns = columns.filter(function (c) { return opts.selectedColumnIds.indexOf(c.id) !== -1; });
-      if (!columns.length) { setStatus('Select at least one column to export.', true); return null; }
+      if (!columns.length) { setStatus(WSI18n.t('msg.selectColumnToExport'), true); return null; }
     }
 
     if (opts.includeRawValues) {
@@ -6561,7 +6745,7 @@
       triggerDownload(blob, currentExportFilenameBase('csv', data.rows.length) + '.csv');
       setStatus(rowsLabel(data.rows.length) + ' exported as CSV.', false, 'success');
     } catch (e) {
-      setStatus('CSV export failed.', true);
+      setStatus(WSI18n.t('msg.csvExportFailed'), true);
     }
   }
 
@@ -6574,7 +6758,7 @@
       triggerDownload(blob, currentExportFilenameBase('xlsx', data.rows.length) + '.xlsx');
       setStatus(rowsLabel(data.rows.length) + ' exported as Excel.', false);
     } catch (e) {
-      setStatus('Excel export failed.', true);
+      setStatus(WSI18n.t('msg.excelExportFailed'), true);
     }
   }
 
@@ -6587,7 +6771,7 @@
       triggerDownload(blob, currentExportFilenameBase('json', data.rows.length) + '.json');
       setStatus(rowsLabel(data.rows.length) + ' exported as JSON.', false);
     } catch (e) {
-      setStatus('JSON export failed.', true);
+      setStatus(WSI18n.t('msg.jsonExportFailed'), true);
     }
   }
 
@@ -6603,7 +6787,7 @@
       triggerDownload(blob, currentExportFilenameBase('ndjson', data.rows.length) + '.ndjson');
       setStatus(rowsLabel(data.rows.length) + ' exported as NDJSON.', false);
     } catch (e) {
-      setStatus('NDJSON export failed.', true);
+      setStatus(WSI18n.t('msg.ndjsonExportFailed'), true);
     }
   }
 
@@ -6621,12 +6805,12 @@
     }
     var data = buildExportDataForCurrentOptions();
     if (!data) return;
-    setStatus('Sending to Google Sheets…', false, 'running');
+    setStatus(WSI18n.t('msg.sendingToSheets'), false, 'running');
     try {
       await WSDestinations.exportToGoogleSheets(data, { mode: 'new' });
       setStatus(rowsLabel(data.rows.length) + ' sent to Google Sheets.', false, 'success');
     } catch (e) {
-      setStatus('Google Sheets export failed: ' + friendlyErrorMessage(e, 'an unknown error.'), true);
+      setStatus(WSI18n.t('msg.sheetsExportFailed', { error: friendlyErrorMessage(e, 'an unknown error.') }), true);
     }
   }
 
@@ -6651,7 +6835,7 @@
       if (!ok) throw new Error('execCommand copy failed');
       setStatus(label, false);
     } catch (e2) {
-      setStatus('Copy failed — clipboard access was blocked.', true);
+      setStatus(WSI18n.t('msg.copyFailedClipboard'), true);
     }
   }
 
@@ -6839,25 +7023,25 @@
   function buildDownloadSummaryText(queueResult) {
     var s = queueResult.stats;
     var lines = [];
-    lines.push((downloadKind === 'image' ? 'Image URLs found: ' : 'Files found: ') + s.totalRows);
-    lines.push('Unique: ' + s.unique);
-    if (s.duplicates) lines.push(s.duplicates + ' duplicate' + (s.duplicates === 1 ? '' : 's') + ' skipped');
-    if (s.invalid) lines.push(s.invalid + ' invalid URL' + (s.invalid === 1 ? '' : 's') + ' skipped');
-    if (s.empty) lines.push(s.empty + ' empty value' + (s.empty === 1 ? '' : 's') + ' skipped');
-    if (s.typeFilterSkipped) lines.push(s.typeFilterSkipped + ' skipped by file type filter');
+    lines.push(WSI18n.t(downloadKind === 'image' ? 'download.imageUrlsFound' : 'download.filesFound', { count: s.totalRows }));
+    lines.push(WSI18n.t('download.unique', { count: s.unique }));
+    if (s.duplicates) lines.push(WSI18n.t('download.duplicatesSkipped', { count: s.duplicates }));
+    if (s.invalid) lines.push(WSI18n.t('download.invalidSkipped', { count: s.invalid }));
+    if (s.empty) lines.push(WSI18n.t('download.emptySkipped', { count: s.empty }));
+    if (s.typeFilterSkipped) lines.push(WSI18n.t('download.skippedByTypeFilter', { count: s.typeFilterSkipped }));
     var types = Object.keys(s.byType);
     if (downloadKind === 'file' && types.length) {
       lines.push('');
       types.sort().forEach(function (t) { lines.push(t + ': ' + s.byType[t]); });
     }
     lines.push('');
-    lines.push('Estimated names generated: ' + queueResult.items.length);
+    lines.push(WSI18n.t('download.estimatedNames', { count: queueResult.items.length }));
     return lines.join('\n');
   }
 
   function updateDownloadPreview() {
     if (!els.dlColumnSelect.value) {
-      els.dlPreviewSummary.textContent = 'No matching column available.';
+      els.dlPreviewSummary.textContent = WSI18n.t('download.noMatchingColumn');
       return;
     }
     var result = WSDownloads.buildDownloadQueue(getDownloadScopeRows(), effectiveColumns(), buildCurrentDownloadOptions());
@@ -6898,10 +7082,10 @@
 
   async function handleStartDownload() {
     var options = buildCurrentDownloadOptions();
-    if (!options.columnId) { setStatus('No column selected.', true); return; }
+    if (!options.columnId) { setStatus(WSI18n.t('msg.noColumnSelected'), true); return; }
 
     var queueResult = WSDownloads.buildDownloadQueue(getDownloadScopeRows(), effectiveColumns(), options);
-    if (!queueResult.items.length) { setStatus('No valid URLs to download.', true); return; }
+    if (!queueResult.items.length) { setStatus(WSI18n.t('msg.noValidUrlsToDownload'), true); return; }
 
     var folderName = WSDownloads.sanitizeFolderName(els.dlFolderName.value) || 'Web Scraper';
     // V1.13.2: each item's filename gets an images/ or files/ prefix so
@@ -6913,13 +7097,13 @@
       return { id: it.id, url: it.url, filename: (options.downloadKind === 'image' ? 'images/' : 'files/') + it.filename };
     });
 
-    setStatus('Requesting permission…', false, 'running');
+    setStatus(WSI18n.t('msg.requestingPermission'), false, 'running');
     var perm = await requestOriginPermissions(zipItems);
-    if (!perm.ok) { setStatus('Permission was declined — downloading needs access to fetch these files.', true, 'warning'); return; }
+    if (!perm.ok) { setStatus(WSI18n.t('msg.permissionDeclinedDownload'), true, 'warning'); return; }
 
     var runId = makeZipRunId();
     var zipFilename = WSDownloads.sanitizeFilename(safeHostForFilename() + '_' + (options.downloadKind === 'image' ? 'images' : 'files')) + '.zip';
-    setStatus('Starting download…', false, 'running');
+    setStatus(WSI18n.t('msg.startingDownload'), false, 'running');
     try {
       var res = await sendToBackground({
         type: 'START_ZIP_RUN', runId: runId, kind: options.downloadKind, zipFilename: zipFilename, folderName: folderName,
@@ -6927,7 +7111,7 @@
       });
       if (!res || !res.ok) throw new Error('start failed');
     } catch (e) {
-      setStatus("Couldn't start the download.", true);
+      setStatus(WSI18n.t('msg.couldNotStartDownload'), true);
       return;
     }
     activeDownloadPurpose = 'bulk';
@@ -6946,9 +7130,9 @@
   var ZIP_TERMINAL_STATUSES = ['completed', 'cancelled', 'error'];
 
   function zipKindLabel(kind) {
-    if (kind === 'image') return 'images';
-    if (kind === 'file') return 'files';
-    return 'assets';
+    if (kind === 'image') return WSI18n.t('zipKind.image');
+    if (kind === 'file') return WSI18n.t('zipKind.file');
+    return WSI18n.t('zipKind.asset');
   }
 
   /** Spec's exact progress vocabulary: "Downloading images 18/60" /
@@ -6958,17 +7142,17 @@
     var c = state.counts;
     var lines = [];
     if (state.status === 'fetching' || state.status === 'awaiting-manifest') {
-      lines.push('Downloading ' + zipKindLabel(state.kind) + ' ' + (c.fetched + c.failed) + '/' + c.total);
+      lines.push(WSI18n.t('download.progressCount', { kind: zipKindLabel(state.kind), done: (c.fetched + c.failed), total: c.total }));
     } else if (state.status === 'zipping') {
-      lines.push('Building ZIP…');
+      lines.push(WSI18n.t('zip.buildingZip'));
     } else if (state.status === 'completed') {
-      lines.push('Ready');
+      lines.push(WSI18n.t('zip.ready'));
     } else if (state.status === 'cancelled') {
-      lines.push('Cancelled.');
+      lines.push(WSI18n.t('zip.cancelled'));
     } else if (state.status === 'error') {
-      lines.push('⚠ ' + (state.error || 'Something went wrong.'));
+      lines.push('⚠ ' + (state.error || WSI18n.t('zip.somethingWrong')));
     }
-    if (c.failed) lines.push('Failed: ' + c.failed);
+    if (c.failed) lines.push(WSI18n.t('zip.failedCount', { count: c.failed }));
     return lines;
   }
 
@@ -6976,21 +7160,21 @@
     if (activeDownloadPurpose !== 'bulk') return; // this run belongs to the Research Bundle panel instead — see renderResearchProgress
     els.downloadProgressSection.hidden = false;
     if (!state) {
-      els.dlStatusBadge.textContent = 'STARTING';
+      els.dlStatusBadge.textContent = localizedStatusLabel('starting');
       els.dlStatusBadge.className = 'ws-status-badge ws-status-running';
-      els.dlProgressText.textContent = 'Downloading ' + zipKindLabel(downloadKind) + ' 0/…';
+      els.dlProgressText.textContent = WSI18n.t('download.progressCount', { kind: zipKindLabel(downloadKind), done: 0, total: '…' });
       els.dlFolderNote.textContent = '';
       els.dlStopBtn.hidden = false;
       els.dlRetryBtn.hidden = true;
       els.dlDoneBtn.hidden = true;
       return;
     }
-    els.dlStatusBadge.textContent = state.status.toUpperCase();
+    els.dlStatusBadge.textContent = localizedStatusLabel(state.status);
     els.dlStatusBadge.className = 'ws-status-badge ws-status-' + (ZIP_STATUS_BADGE_CLASS[state.status] || state.status);
     els.dlProgressText.textContent = zipProgressLines(state).join('\n');
     els.dlFolderNote.textContent = state.status === 'completed'
-      ? ('Saved to: ' + state.folderName + '/' + state.zipFilename)
-      : ('Folder: ' + state.folderName);
+      ? WSI18n.t('download.savedTo', { path: state.folderName + '/' + state.zipFilename })
+      : WSI18n.t('download.folderLabel', { name: state.folderName });
 
     var terminal = ZIP_TERMINAL_STATUSES.indexOf(state.status) !== -1;
     els.dlStopBtn.hidden = terminal;
@@ -6999,13 +7183,13 @@
   }
 
   async function handleStopDownload() {
-    setStatus('Stopping…', false);
-    try { await sendToBackground({ type: 'STOP_ZIP_RUN', runId: currentZipRunId }); } catch (e) { setStatus('Could not reach the download manager.', true); }
+    setStatus(WSI18n.t('msg.stopping'), false);
+    try { await sendToBackground({ type: 'STOP_ZIP_RUN', runId: currentZipRunId }); } catch (e) { setStatus(WSI18n.t('msg.couldNotReachDownloadManager'), true); }
   }
 
   async function handleRetryFailedDownloads() {
-    setStatus('Retrying failed downloads…', false, 'running');
-    try { await sendToBackground({ type: 'RETRY_FAILED_ZIP_ITEMS', runId: currentZipRunId }); } catch (e) { setStatus('Could not reach the download manager.', true); }
+    setStatus(WSI18n.t('msg.retryingFailedDownloads'), false, 'running');
+    try { await sendToBackground({ type: 'RETRY_FAILED_ZIP_ITEMS', runId: currentZipRunId }); } catch (e) { setStatus(WSI18n.t('msg.couldNotReachDownloadManager'), true); }
   }
 
   function handleDownloadDone() {
@@ -7124,29 +7308,29 @@
   function updateResearchPreview() {
     var rows = getResearchScopeRows();
     var lines = [];
-    lines.push('Rows: ' + rows.length);
+    lines.push(WSI18n.t('research.rowsCount', { count: rows.length }));
     if (els.rbIncludeImages.checked && !els.rbImageColumnWrap.hidden) {
       var plan = WSResearch.buildAssetPlan(rows, effectiveColumns(), WSResearch.assignDatasetIds(rows), {
         includeImages: true, imageColumnId: els.rbImageColumnSelect.value, nameColumnId: pickResearchNameColumnId()
       });
-      lines.push('Images: ' + plan.imageQueue.length + (plan.imageStats && plan.imageStats.duplicates ? ' (' + plan.imageStats.duplicates + ' duplicate URL' + (plan.imageStats.duplicates === 1 ? '' : 's') + ' reusing the same file)' : ''));
+      lines.push(WSI18n.t('research.imagesCount', { count: plan.imageQueue.length }) + (plan.imageStats && plan.imageStats.duplicates ? WSI18n.t('research.imagesDuplicateNote', { count: plan.imageStats.duplicates }) : ''));
     }
     if (els.rbIncludeFiles.checked && !els.rbFileColumnWrap.hidden) {
       var filePlan = WSResearch.buildAssetPlan(rows, effectiveColumns(), WSResearch.assignDatasetIds(rows), {
         includeFiles: true, fileColumnId: els.rbFileColumnSelect.value, nameColumnId: pickResearchNameColumnId()
       });
-      lines.push('Files: ' + filePlan.fileQueue.length);
+      lines.push(WSI18n.t('research.filesCount', { count: filePlan.fileQueue.length }));
     }
     var formats = [];
     if (els.rbIncludeCsv.checked) formats.push('CSV');
     if (els.rbIncludeXlsx.checked) formats.push('Excel');
     if (els.rbIncludeJson.checked) formats.push('JSON');
-    lines.push('Manifest formats: ' + (formats.length ? formats.join(', ') : 'none selected'));
+    lines.push(WSI18n.t('research.manifestFormats', { formats: formats.length ? formats.join(', ') : WSI18n.t('research.noneSelected') }));
     els.rbPreviewSummary.textContent = lines.join('\n');
   }
 
   function handleOpenResearchPanel() {
-    if (!state.columns.length) { setStatus('Add at least one column first.', true); return; }
+    if (!state.columns.length) { setStatus(WSI18n.t('msg.addColumnFirst'), true); return; }
     els.autoDetectPanel.hidden = true;
     els.transformPanel.hidden = true;
     els.filterPanel.hidden = true;
@@ -7186,11 +7370,11 @@
     var imageColumnId = includeImages ? els.rbImageColumnSelect.value : null;
     var fileColumnId = includeFiles ? els.rbFileColumnSelect.value : null;
 
-    if (!includeCsv && !includeXlsx && !includeJson) { setStatus('Select at least one manifest format (CSV, Excel, or JSON).', true, 'warning'); return; }
+    if (!includeCsv && !includeXlsx && !includeJson) { setStatus(WSI18n.t('msg.selectManifestFormat'), true, 'warning'); return; }
 
     var columns = effectiveColumns();
     var rows = getResearchScopeRows();
-    if (!rows.length) { setStatus('No rows to include in the bundle.', true); return; }
+    if (!rows.length) { setStatus(WSI18n.t('msg.noRowsInBundle'), true); return; }
 
     var datasetName = WSResearch.sanitizeDatasetName(datasetNameRaw);
     // V1.13.2: the whole bundle is now ONE file — Web Scraper/Research/
@@ -7223,7 +7407,7 @@
       .concat(plan.fileQueue.map(function (it) { return Object.assign({}, it, { assetKind: 'file' }); }));
 
     els.researchSetupPanel.hidden = true;
-    els.rbProgressTitle.textContent = 'Creating Research Bundle';
+    els.rbProgressTitle.textContent = WSI18n.t('research.creatingBundle');
 
     if (loadedScraperId) {
       WSRecipes.setResearchPrefs(loadedScraperId, {
@@ -7239,17 +7423,17 @@
     // case "no assets" itself.
     var perm = { ok: true, patterns: [] };
     if (assetItems.length) {
-      setStatus('Requesting permission…', false, 'running');
+      setStatus(WSI18n.t('msg.requestingPermission'), false, 'running');
       perm = await requestOriginPermissions(assetItems);
       if (!perm.ok) {
-        setStatus('Permission was declined — the Research Bundle needs access to fetch these images/files.', true, 'warning');
+        setStatus(WSI18n.t('msg.permissionDeclinedResearch'), true, 'warning');
         researchBundle = null;
         return;
       }
     }
 
     var runId = makeZipRunId();
-    setStatus('Starting Research Bundle…', false, 'running');
+    setStatus(WSI18n.t('msg.startingResearchBundle'), false, 'running');
     try {
       var res = await sendToBackground({
         type: 'START_ZIP_RUN', runId: runId, kind: 'research', zipFilename: zipFilename, folderName: folderName,
@@ -7257,7 +7441,7 @@
       });
       if (!res || !res.ok) throw new Error('start failed');
     } catch (e) {
-      setStatus("Couldn't start the Research Bundle.", true);
+      setStatus(WSI18n.t('msg.couldNotStartResearchBundle'), true);
       researchBundle = null;
       return;
     }
@@ -7327,31 +7511,31 @@
     var fileTotal = researchBundle.includeFiles ? Object.keys(researchBundle.fileUrlToFilename).length : 0;
 
     if (!state) {
-      els.rbStatusBadge.textContent = 'STARTING';
+      els.rbStatusBadge.textContent = localizedStatusLabel('starting');
       els.rbStatusBadge.className = 'ws-status-badge ws-status-running';
-      els.rbProgressText.textContent = 'Rows: ' + researchBundle.rows.length + '\nImages: ' + imageTotal + '\nFiles: ' + fileTotal;
-      els.rbFolderNote.textContent = 'Folder: ' + researchBundle.folderName + '/' + researchBundle.zipFilename;
+      els.rbProgressText.textContent = WSI18n.t('research.rowsCount', { count: researchBundle.rows.length }) + '\n' + WSI18n.t('research.imagesCount', { count: imageTotal }) + '\n' + WSI18n.t('research.filesCount', { count: fileTotal });
+      els.rbFolderNote.textContent = WSI18n.t('download.folderLabel', { name: researchBundle.folderName + '/' + researchBundle.zipFilename });
       els.rbStopBtn.hidden = false;
       els.rbRetryBtn.hidden = true;
       els.rbDoneBtn.hidden = true;
       return;
     }
 
-    els.rbStatusBadge.textContent = state.status.toUpperCase();
+    els.rbStatusBadge.textContent = localizedStatusLabel(state.status);
     els.rbStatusBadge.className = 'ws-status-badge ws-status-' + (ZIP_STATUS_BADGE_CLASS[state.status] || state.status);
-    var lines = ['Rows: ' + researchBundle.rows.length, 'Images: ' + imageTotal, 'Files: ' + fileTotal, ''].concat(zipProgressLines(state));
+    var lines = [WSI18n.t('research.rowsCount', { count: researchBundle.rows.length }), WSI18n.t('research.imagesCount', { count: imageTotal }), WSI18n.t('research.filesCount', { count: fileTotal }), ''].concat(zipProgressLines(state));
     els.rbProgressText.textContent = lines.join('\n');
     els.rbFolderNote.textContent = state.status === 'completed'
-      ? ('Saved to: ' + state.folderName + '/' + state.zipFilename)
-      : ('Folder: ' + state.folderName);
+      ? WSI18n.t('download.savedTo', { path: state.folderName + '/' + state.zipFilename })
+      : WSI18n.t('download.folderLabel', { name: state.folderName });
 
     var terminal = ZIP_TERMINAL_STATUSES.indexOf(state.status) !== -1;
     els.rbStopBtn.hidden = terminal;
     els.rbRetryBtn.hidden = !(terminal && state.counts.failed > 0);
     els.rbDoneBtn.hidden = !terminal;
     if (terminal) {
-      els.rbProgressTitle.textContent = state.status === 'completed' ? 'Research Bundle Complete'
-        : (state.status === 'cancelled' ? 'Research Bundle Cancelled' : 'Research Bundle Failed');
+      els.rbProgressTitle.textContent = state.status === 'completed' ? WSI18n.t('research.bundleComplete')
+        : (state.status === 'cancelled' ? WSI18n.t('research.bundleCancelled') : WSI18n.t('research.bundleFailed'));
     }
 
     // background.js parks a 'research' run at 'awaiting-manifest' once
@@ -7369,19 +7553,19 @@
       researchBundle.manifestsSent = true;
       var manifestFiles = computeResearchManifestFiles(researchBundle, state.items);
       sendToBackground({ type: 'PROVIDE_RESEARCH_MANIFEST', runId: state.runId, manifestFiles: manifestFiles })
-        .catch(function (e) { setStatus('Could not finalize the Research Bundle: ' + friendlyErrorMessage(e, 'please try again.'), true); });
+        .catch(function (e) { setStatus(WSI18n.t('msg.couldNotFinalizeResearchBundle', { error: friendlyErrorMessage(e, 'please try again.') }), true); });
     }
   }
 
   async function handleStopResearchBundle() {
-    setStatus('Stopping…', false);
-    try { await sendToBackground({ type: 'STOP_ZIP_RUN', runId: currentZipRunId }); } catch (e) { setStatus('Could not reach the download manager.', true); }
+    setStatus(WSI18n.t('msg.stopping'), false);
+    try { await sendToBackground({ type: 'STOP_ZIP_RUN', runId: currentZipRunId }); } catch (e) { setStatus(WSI18n.t('msg.couldNotReachDownloadManager'), true); }
   }
 
   async function handleRetryFailedResearchAssets() {
-    setStatus('Retrying failed assets…', false, 'running');
+    setStatus(WSI18n.t('msg.retryingFailedAssets'), false, 'running');
     if (researchBundle) researchBundle.manifestsSent = false; // a successful retry must regenerate the manifest with updated Asset Status
-    try { await sendToBackground({ type: 'RETRY_FAILED_ZIP_ITEMS', runId: currentZipRunId }); } catch (e) { setStatus('Could not reach the download manager.', true); }
+    try { await sendToBackground({ type: 'RETRY_FAILED_ZIP_ITEMS', runId: currentZipRunId }); } catch (e) { setStatus(WSI18n.t('msg.couldNotReachDownloadManager'), true); }
   }
 
   function handleResearchBundleDone() {
@@ -7445,7 +7629,7 @@
     els.compareKeySelect.innerHTML = '';
     var entireOpt = document.createElement('option');
     entireOpt.value = 'entire-row';
-    entireOpt.textContent = 'Entire Row';
+    entireOpt.textContent = WSI18n.t('column.entireRow');
     els.compareKeySelect.appendChild(entireOpt);
     var columns = effectiveColumns();
     columns.forEach(function (c) {
@@ -7484,10 +7668,10 @@
     var previousSnapshot = await WSSnapshots.getLatestSnapshot(getSnapshotGroupFilter());
     if (!previousSnapshot) {
       // Spec #15: first run is not an error state.
-      els.snapshotInfoText.textContent = 'No previous snapshot yet.';
+      els.snapshotInfoText.textContent = WSI18n.t('snapshots.infoNone');
       els.compareSnapshotBtn.hidden = true;
     } else {
-      els.snapshotInfoText.textContent = 'Previous snapshot: ' + formatSnapshotDate(previousSnapshot.createdAt) + ' (' + previousSnapshot.rowCount + ' rows)';
+      els.snapshotInfoText.textContent = WSI18n.t('snapshots.infoPrevious', { date: formatSnapshotDate(previousSnapshot.createdAt), count: previousSnapshot.rowCount });
       els.compareSnapshotBtn.hidden = false;
     }
   }
@@ -7527,7 +7711,7 @@
   }
 
   async function handleSaveSnapshot() {
-    if (!rawRows.length) { setStatus('Run Preview first — there’s nothing to snapshot yet.', true); return; }
+    if (!rawRows.length) { setStatus(WSI18n.t('msg.runPreviewFirstSnapshot'), true); return; }
     var res = await WSSnapshots.saveSnapshot(currentSnapshotInput());
     if (!res.ok) { setStatus(res.error, true); return; }
     await refreshSnapshotInfo();
@@ -7678,7 +7862,7 @@
     els.changesEmptyNote.hidden = entries.length > 0;
     if (entries.length > CHANGES_LIST_LIMIT) {
       els.changesTruncatedNote.hidden = false;
-      els.changesTruncatedNote.textContent = 'Showing first ' + CHANGES_LIST_LIMIT.toLocaleString() + ' of ' + entries.length.toLocaleString() + ' changes.';
+      els.changesTruncatedNote.textContent = WSI18n.t('changes.truncatedNote', { limit: CHANGES_LIST_LIMIT.toLocaleString(), total: entries.length.toLocaleString() });
     } else {
       els.changesTruncatedNote.hidden = true;
     }
@@ -7694,14 +7878,14 @@
 
   function renderChangesSummary(result, previousSnapshot) {
     var lines = [];
-    lines.push('Previous snapshot: ' + formatSnapshotDate(previousSnapshot.createdAt));
-    lines.push('Current: ' + formatSnapshotDate(Date.now()));
+    lines.push(WSI18n.t('changes.previousSnapshotLabel', { date: formatSnapshotDate(previousSnapshot.createdAt) }));
+    lines.push(WSI18n.t('changes.currentLabel', { date: formatSnapshotDate(Date.now()) }));
     lines.push('');
-    lines.push('Rows: ' + result.stats.previousCount + ' previous, ' + result.stats.currentCount + ' current');
+    lines.push(WSI18n.t('changes.rowsPreviousCurrent', { previous: result.stats.previousCount, current: result.stats.currentCount }));
     lines.push('');
-    lines.push('Changes:  +' + result.stats.newCount + ' New   −' + result.stats.removedCount + ' Removed   ~' + result.stats.changedCount + ' Changed');
+    lines.push(WSI18n.t('changes.changesLine', { added: result.stats.newCount, removed: result.stats.removedCount, changed: result.stats.changedCount }));
     if (result.stats.priceDecreased || result.stats.priceIncreased) {
-      lines.push('Price:  ↓' + result.stats.priceDecreased + ' decreased   ↑' + result.stats.priceIncreased + ' increased');
+      lines.push(WSI18n.t('changes.priceLine', { decreased: result.stats.priceDecreased, increased: result.stats.priceIncreased }));
     }
     els.changesSummaryText.textContent = lines.join('\n');
 
@@ -7715,9 +7899,9 @@
   }
 
   async function handleCompareWithPrevious() {
-    if (!rawRows.length) { setStatus('Run Preview first so there’s something to compare.', true); return; }
+    if (!rawRows.length) { setStatus(WSI18n.t('msg.runPreviewFirstCompare'), true); return; }
     var previousSnapshot = await WSSnapshots.getLatestSnapshot(getSnapshotGroupFilter());
-    if (!previousSnapshot) { setStatus('No previous snapshot to compare with — save one first.', true); return; }
+    if (!previousSnapshot) { setStatus(WSI18n.t('msg.noPreviousSnapshot'), true); return; }
 
     var transformed = computeTransformedResult();
     var columns = namedColumnsFromState();
@@ -7741,7 +7925,7 @@
 
   async function handleSaveAfterCompare() {
     if (!els.saveSnapshotAfterCompare.checked) {
-      setStatus('Check "Save current results as a new snapshot" first.', true);
+      setStatus(WSI18n.t('msg.checkSaveSnapshotFirst'), true);
       return;
     }
     await handleSaveSnapshot();
@@ -7751,15 +7935,15 @@
   var PRICE_EXPORT_HEADERS = ['Product', 'Old Price', 'New Price', 'Difference', 'Percent', 'Link'];
 
   function currentChangesExport() {
-    if (!lastComparisonResult) { setStatus('Run a comparison first.', true); return null; }
+    if (!lastComparisonResult) { setStatus(WSI18n.t('msg.runComparisonFirst'), true); return null; }
     var linkCol = pickLinkColumnName();
     if (changesActiveFilter === 'price') {
       var rows = WSChanges.priceChangesToExportRows(lastComparisonResult, pickTitleColumnName(), linkCol);
-      if (!rows.length) { setStatus('No price changes to export.', true); return null; }
+      if (!rows.length) { setStatus(WSI18n.t('msg.noPriceChangesToExport'), true); return null; }
       return { rows: rows, columns: PRICE_EXPORT_HEADERS.map(function (h) { return { id: h, name: h }; }) };
     }
     var allRows = WSChanges.changesToExportRows(lastComparisonResult, linkCol);
-    if (!allRows.length) { setStatus('No changes to export.', true); return null; }
+    if (!allRows.length) { setStatus(WSI18n.t('msg.noChangesToExport'), true); return null; }
     return { rows: allRows, columns: CHANGES_EXPORT_HEADERS.map(function (h) { return { id: h, name: h }; }) };
   }
 
@@ -7772,7 +7956,7 @@
       triggerDownload(blob, 'web-scraper-changes-' + safeHostForFilename() + '-' + Date.now() + '.csv');
       setStatus(rowsLabel(data.rows.length) + ' of changes exported as CSV.', false);
     } catch (e) {
-      setStatus('CSV export failed.', true);
+      setStatus(WSI18n.t('msg.csvExportFailed'), true);
     }
   }
 
@@ -7785,7 +7969,7 @@
       triggerDownload(blob, 'web-scraper-changes-' + safeHostForFilename() + '-' + Date.now() + '.xlsx');
       setStatus(rowsLabel(data.rows.length) + ' of changes exported as Excel.', false);
     } catch (e) {
-      setStatus('Excel export failed.', true);
+      setStatus(WSI18n.t('msg.excelExportFailed'), true);
     }
   }
 
@@ -7803,7 +7987,7 @@
       triggerDownload(blob, 'web-scraper-changes-' + safeHostForFilename() + '-' + Date.now() + '.json');
       setStatus(rowsLabel(data.rows.length) + ' of changes exported as JSON.', false);
     } catch (e) {
-      setStatus('JSON export failed.', true);
+      setStatus(WSI18n.t('msg.jsonExportFailed'), true);
     }
   }
 
@@ -7926,6 +8110,12 @@
     updateResearchTabState();
     updateDetailTabAvailability();
     if (tab === 'detay') renderDetailSetup();
+    // FINAL UI POLISH PASS: the sticky status bar's text depends on which
+    // tab is active (mission section 5) — re-render on every switch, not
+    // just when the underlying state changes, so simply navigating to/away
+    // from Detay updates it immediately. Presentation-only: reads
+    // activeTab/lastRenderedDetailState/activeLiveSession, mutates neither.
+    renderStickyStatus();
     if (!opts || opts.persist !== false) {
       try { sessionSet(ACTIVE_TAB_SESSION_KEY, tab); } catch (e) { /* best-effort — remembering the last tab is never allowed to break tab switching itself */ }
     }
@@ -7952,6 +8142,12 @@
     // before", not just "cleared the current page's columns") gets the
     // compact 4-step walkthrough instead of just the bare 1-line prompt.
     if (els.firstRunHelp) els.firstRunHelp.hidden = hasColumns || lastKnownScraperCount > 0;
+    // FINAL UI POLISH PASS (mission section 7): the "SON KOŞU"/"Last Run"
+    // card is only ever relevant once there's an actual previous run to
+    // link to — same condition #scrape-view-results-btn's own hidden
+    // state already used, applied to its new wrapper too, so Columns/
+    // Preview/BAŞLA stay the first thing a fresh setup sees.
+    if (els.scrapeLastRunCard) els.scrapeLastRunCard.hidden = !hasResults;
     if (!hasColumns) {
       els.scrapeStatusText.textContent = WSI18n.t('scrape.status.empty');
       els.scrapeViewResultsBtn.hidden = true;
@@ -7959,7 +8155,12 @@
       els.scrapeStatusText.textContent = WSI18n.t('scrape.status.ready');
       els.scrapeViewResultsBtn.hidden = true;
     } else {
-      els.scrapeStatusText.textContent = WSI18n.t('scrape.status.captured', { count: rawRows.length });
+      // FINAL MICRO UI POLISH (item 1): compact "N kayıt • Tamamlandı"
+      // form instead of the old "N sonuç çekildi." sentence — same
+      // rawRows.length source, same "Tamamlandı" wording the rest of the
+      // app already uses for a finished run, just presented more
+      // consistently with the card's compact SON KOŞU/Last Run style.
+      els.scrapeStatusText.textContent = WSI18n.t('sticky.recordCount', { count: rawRows.length }) + ' • ' + WSI18n.t('status.completed');
       els.scrapeViewResultsBtn.hidden = false;
     }
   }
@@ -8052,16 +8253,16 @@
       note.classList.remove('ws-license-verification-note-warn');
       if (currentLicenseState.uiStatus === 'revoked') {
         note.hidden = false;
-        note.textContent = 'This license was refunded or revoked' + (currentLicenseState.lastServerCheckAt ? ' (checked ' + new Date(currentLicenseState.lastServerCheckAt).toLocaleDateString() + ')' : '') + '. Purchase again below to restore unlimited access.';
+        note.textContent = WSI18n.t('settings.licenseRevokedNote', { checkedSuffix: currentLicenseState.lastServerCheckAt ? (' (checked ' + new Date(currentLicenseState.lastServerCheckAt).toLocaleDateString() + ').') : '.' });
         note.classList.add('ws-license-verification-note-warn');
       } else if (currentLicenseState.isLicensed && currentLicenseState.verificationSource === 'dev-simulated') {
         note.hidden = false;
-        note.textContent = 'Simulated for local development — never a real purchase.';
+        note.textContent = WSI18n.t('settings.licenseSimulatedNote');
       } else if (currentLicenseState.isLicensed && currentLicenseState.verificationSource === 'server') {
         note.hidden = false;
         note.textContent = currentLicenseState.lastServerCheckAt
-          ? 'Verified with the license server ' + currentLicenseState.daysSinceLastServerCheck + ' day' + (currentLicenseState.daysSinceLastServerCheck === 1 ? '' : 's') + ' ago.'
-          : 'Verified at activation.';
+          ? WSI18n.t('settings.licenseVerifiedDaysAgo', { count: currentLicenseState.daysSinceLastServerCheck })
+          : WSI18n.t('settings.licenseVerifiedAtActivation');
       } else {
         note.hidden = true;
         note.textContent = '';
@@ -8490,8 +8691,7 @@
     var info = computeUniqueDetailUrls();
     var fieldCount = (deepScrapeConfig.fields || []).length;
     // spec #21: neutral, honest numbers — never a fake precise time estimate.
-    els.dsWorkloadSummary.textContent = 'Rows: ' + rawRows.length + '  •  Unique detail URLs: ' + info.urls.length +
-      '  •  Detail fields: ' + fieldCount + '  •  Estimated requests: ' + info.urls.length;
+    els.dsWorkloadSummary.textContent = WSI18n.t('deepScrape.workloadSummary', { rows: rawRows.length, urls: info.urls.length, fields: fieldCount, requests: info.urls.length });
   }
 
   function handleToggleDeepScrapePanel() {
@@ -8550,7 +8750,7 @@
   function handleDsFieldSaveClick() {
     var name = els.dsFieldName.value.trim();
     var selector = els.dsFieldSelector.value.trim();
-    if (!name || !selector) { setStatus('Enter both a field name and a selector.', true); return; }
+    if (!name || !selector) { setStatus(WSI18n.t('msg.enterFieldNameAndSelector'), true); return; }
     var field = {
       id: deepScrapeEditingFieldId || WSStorage.makeColumnId(),
       name: name,
@@ -8580,7 +8780,7 @@
    * (the list) page. */
   async function handleDsPickFieldsClick() {
     var info = computeUniqueDetailUrls();
-    if (!info.urls.length) { setStatus('No detail URLs available yet — run Preview first.', true); return; }
+    if (!info.urls.length) { setStatus(WSI18n.t('msg.noDetailUrlsYet'), true); return; }
     var sampleUrl = info.urls[0];
     try {
       var tab = await new Promise(function (resolve, reject) {
@@ -8591,9 +8791,9 @@
       });
       await new Promise(function (r) { setTimeout(r, 400); }); // let the new tab's content script have a moment to inject/settle
       await chrome.tabs.sendMessage(tab.id, { type: 'START_PICK', purpose: 'detail-field', targetHostname: hostname });
-      setStatus('Pick fields on the sample page that just opened, then come back to this popup.', false);
+      setStatus(WSI18n.t('msg.pickFieldsOnSamplePage'), false);
     } catch (e) {
-      setStatus("Couldn't open the sample page for picking.", true);
+      setStatus(WSI18n.t('msg.couldNotOpenSamplePage'), true);
     }
   }
 
@@ -8613,7 +8813,10 @@
     await sessionSet(key, null);
     if (newOnes.length) {
       deepScrapeConfig.enabled = true;
-      els.deepScrapePanel.hidden = false;
+      // RESULTS-TAB DEEP SCRAPE UI REMOVAL: #deepscrape-panel no longer
+      // exists — the field merge above (real state) still happens
+      // regardless; only the now-absent UI reveal is guarded.
+      if (els.deepScrapePanel) els.deepScrapePanel.hidden = false;
       renderDeepScrapePanel();
       setStatus(newOnes.length + ' detail field' + (newOnes.length === 1 ? '' : 's') + ' added from the sample page.', false, 'success');
     }
@@ -8626,41 +8829,41 @@
    * just without the retry/queue/session-tracking machinery a real run
    * needs), so a broken selector is caught here, not 400 requests later. */
   async function handleDsTestClick() {
-    if (!deepScrapeConfig.fields || !deepScrapeConfig.fields.length) { setStatus('Add at least one detail field first.', true); return; }
+    if (!deepScrapeConfig.fields || !deepScrapeConfig.fields.length) { setStatus(WSI18n.t('msg.addDetailFieldFirst'), true); return; }
     var info = computeUniqueDetailUrls();
-    if (!info.urls.length) { setStatus('No detail URLs available — run Preview first.', true); return; }
+    if (!info.urls.length) { setStatus(WSI18n.t('msg.noDetailUrlsAvailable'), true); return; }
     var sampleUrls = info.urls.slice(0, 3);
 
     var originPatterns = WSDownloads.uniqueOriginPatterns(sampleUrls);
     if (originPatterns.length) {
       var granted = false;
       try { granted = await chrome.permissions.request({ origins: originPatterns }); } catch (e) { granted = false; }
-      if (!granted) { setStatus('Permission was declined — Deep Scraping needs access to the detail pages’ site(s).', true); return; }
+      if (!granted) { setStatus(WSI18n.t('msg.permissionDeclinedDeepScrape'), true); return; }
     }
 
     els.dsTestResults.hidden = false;
-    els.dsTestResults.textContent = 'Testing ' + sampleUrls.length + ' page' + (sampleUrls.length === 1 ? '' : 's') + '…';
+    els.dsTestResults.textContent = WSI18n.t('detail.testingPages', { count: sampleUrls.length });
     var res;
     try {
       res = await sendToBackground({ type: 'TEST_DEEP_SCRAPE_SAMPLE', urls: sampleUrls, fields: deepScrapeConfig.fields });
     } catch (e) {
-      els.dsTestResults.textContent = "Couldn't reach the background service to run the test.";
+      els.dsTestResults.textContent = WSI18n.t('detail.testCouldNotReachBackground');
       return;
     }
-    if (!res || !res.ok) { els.dsTestResults.textContent = 'Test failed to run.'; return; }
+    if (!res || !res.ok) { els.dsTestResults.textContent = WSI18n.t('detail.testFailedToRun'); return; }
 
     var lines = [];
     sampleUrls.forEach(function (url, i) {
       var r = res.results[url];
-      lines.push('Page ' + (i + 1) + ':');
+      lines.push(WSI18n.t('detail.testPageLabel', { n: (i + 1) }));
       if (!r || r.status === 'failed') {
-        lines.push('  Failed' + (r && r.error ? ' — ' + r.error : ''));
+        lines.push('  ' + WSI18n.t('detail.testFailed') + (r && r.error ? ' — ' + r.error : ''));
         return;
       }
       deepScrapeConfig.fields.forEach(function (f) {
         var val = r.fields ? r.fields[f.id] : undefined;
         var display = Array.isArray(val) ? (val.length ? val.join('; ') : null) : (val || null);
-        lines.push('  ' + f.name + ': ' + (display ? '✓ ' + String(display).slice(0, 60) : 'Missing'));
+        lines.push('  ' + f.name + ': ' + (display ? '✓ ' + String(display).slice(0, 60) : WSI18n.t('detail.testMissing')));
       });
     });
     els.dsTestResults.textContent = lines.join('\n');
@@ -8678,18 +8881,18 @@
    * same pattern maybeChargeForCompletedRun already uses for Auto Scroll/
    * Multi-page runs. */
   async function handleDsStartClick() {
-    if (!deepScrapeConfig.fields || !deepScrapeConfig.fields.length) { setStatus('Add at least one detail field first.', true); return; }
-    if (!deepScrapeConfig.sourceColumnId) { setStatus('Choose a Link column to follow first.', true); return; }
+    if (!deepScrapeConfig.fields || !deepScrapeConfig.fields.length) { setStatus(WSI18n.t('msg.addDetailFieldFirst'), true); return; }
+    if (!deepScrapeConfig.sourceColumnId) { setStatus(WSI18n.t('msg.chooseLinkColumnFirst'), true); return; }
     if (!(await trialAllowsNewRun())) { showTrialCompleteModal(); return; }
 
     var info = computeUniqueDetailUrls();
-    if (!info.urls.length) { setStatus('No detail URLs to visit.', true); return; }
+    if (!info.urls.length) { setStatus(WSI18n.t('msg.noDetailUrlsToVisit'), true); return; }
 
     var originPatterns = WSDownloads.uniqueOriginPatterns(info.urls);
     if (originPatterns.length) {
       var granted = false;
       try { granted = await chrome.permissions.request({ origins: originPatterns }); } catch (e) { granted = false; }
-      if (!granted) { setStatus('Permission was declined — Deep Scraping needs access to the detail pages’ site(s).', true); return; }
+      if (!granted) { setStatus(WSI18n.t('msg.permissionDeclinedDeepScrape'), true); return; }
     }
 
     currentDeepScrapeRunId = makeDeepScrapeRunId();
@@ -8729,17 +8932,31 @@
 
   function renderDeepScrapeProgress(dsState) {
     if (!dsState || dsState.runId !== currentDeepScrapeRunId) return;
-    els.dsProgressSection.hidden = false;
+    // RESULTS-TAB DEEP SCRAPE UI REMOVAL (dedup with the Detay tab): the
+    // OLD "Derin Veri Çekme" panel's controls (#deepscrape-panel/#ds-*)
+    // no longer exist in the DOM — every els.dsXxx below is guarded so a
+    // legacy/in-flight run (started before this change, or the shared
+    // ws_deepscrape_run storage key ever populated by ANY source) never
+    // throws trying to update a UI surface that's intentionally gone.
+    // isTerminal/c/mergeDeepScrapeResults()/chargeRunCredit() below are
+    // pure state — deliberately left completely unguarded/unchanged so
+    // merging + trial-credit charging for an already-running legacy job
+    // still completes correctly even with no UI to show it in.
+    if (els.dsProgressSection) els.dsProgressSection.hidden = false;
     var isTerminal = ['completed', 'stopped', 'error'].indexOf(dsState.status) !== -1;
-    els.dsProgressBadge.textContent = dsState.status.toUpperCase();
-    els.dsProgressBadge.className = 'ws-status-badge ws-status-' + dsState.status;
+    if (els.dsProgressBadge) {
+      els.dsProgressBadge.textContent = localizedStatusLabel(dsState.status);
+      els.dsProgressBadge.className = 'ws-status-badge ws-status-' + dsState.status;
+    }
     var c = dsState.counts || {};
     var done = (c.completed || 0) + (c.partial || 0) + (c.failed || 0) + (c.skipped || 0);
     var pct = c.total ? Math.round((done / c.total) * 100) : 0;
-    els.dsProgressText.textContent = done + ' / ' + (c.total || 0) + ' pages  •  Completed: ' + (c.completed || 0) +
-      '  •  Failed: ' + (c.failed || 0) + '  •  Remaining: ' + Math.max(0, (c.total || 0) - done) + '  •  Progress: ' + pct + '%';
-    els.dsProgressCurrent.textContent = dsState.currentUrl ? 'Current: ' + dsState.currentUrl : '';
-    els.dsStopBtn.hidden = isTerminal;
+    if (els.dsProgressText) {
+      els.dsProgressText.textContent = done + ' / ' + (c.total || 0) + ' pages  •  Completed: ' + (c.completed || 0) +
+        '  •  Failed: ' + (c.failed || 0) + '  •  Remaining: ' + Math.max(0, (c.total || 0) - done) + '  •  Progress: ' + pct + '%';
+    }
+    if (els.dsProgressCurrent) els.dsProgressCurrent.textContent = dsState.currentUrl ? 'Current: ' + dsState.currentUrl : '';
+    if (els.dsStopBtn) els.dsStopBtn.hidden = isTerminal;
 
     // V1.20: user-visible retry status for whichever URL is currently
     // in-flight (never affects control flow — purely informational).
@@ -8783,7 +9000,16 @@
     var topReasons = Object.keys(reasonCounts).sort(function (a, b) { return reasonCounts[b] - reasonCounts[a]; }).slice(0, 3);
 
     var lines = [];
-    lines.push(dsState.status === 'stopped' ? 'Stopped' : dsState.status === 'error' ? 'Deep Scrape could not start' : 'DEEP SCRAPE COMPLETE');
+    // FINAL UI REORGANIZATION mission — real production report: this
+    // headline was hardcoded English regardless of locale ("DEEP SCRAPE
+    // COMPLETE" appearing in an otherwise-localized Turkish UI). The
+    // rest of this summary's own field labels (unique pages/Completed/
+    // Partial/Failed/Main failure reasons) remain English by the
+    // project's own documented V1 scope (see this file's own header
+    // comment: "deep-scrape... sub-field forms... intentionally ship
+    // English-only for V1") — only the specific mixed-language string
+    // actually reported is fixed here.
+    lines.push(dsState.status === 'stopped' ? WSI18n.t('status.stopped') : dsState.status === 'error' ? WSI18n.t('deepScrape.summaryError') : WSI18n.t('deepScrape.summaryComplete'));
     lines.push((c.total || 0) + ' unique pages');
     lines.push('Completed: ' + (c.completed || 0) + '   Partial: ' + (c.partial || 0) + '   Failed: ' + (c.failed || 0) + (c.skipped ? '   Skipped: ' + c.skipped : ''));
     if (topReasons.length) {
@@ -8791,8 +9017,13 @@
       lines.push('Main failure reasons:');
       topReasons.forEach(function (reason) { lines.push('  ' + reasonCounts[reason] + ' × ' + reason); });
     }
-    els.dsSummaryText.hidden = false;
-    els.dsSummaryText.textContent = lines.join('\n');
+    // RESULTS-TAB DEEP SCRAPE UI REMOVAL: #ds-summary-text no longer
+    // exists — guarded so a legacy/in-flight run's completion still
+    // computes this summary (harmless) without throwing on the DOM write.
+    if (els.dsSummaryText) {
+      els.dsSummaryText.hidden = false;
+      els.dsSummaryText.textContent = lines.join('\n');
+    }
   }
 
   /** spec #14/#15: merges detail-page field values back into rawRows by
@@ -8916,6 +9147,9 @@
   var detailScope = { mode: 'all', n: null };
   var detailSelectedKeys = Object.create(null); // Set-like: {[stableRowKey]: true}
   var currentDetailRunId = null;
+  // FINAL UI REORGANIZATION mission — see renderDetailProgress()'s own
+  // comment on why this is cached (sticky status bar only).
+  var lastRenderedDetailState = null;
   var detailStorageListenerAttached = false;
   var detailChargedRunIds = Object.create(null); // mirrors deepScrapeChargedRunIds' own belt-and-suspenders idempotency guard
   var detailTemplatesCache = [];
@@ -9632,6 +9866,18 @@
     renderDetailSetup();
   }
 
+  /** FINAL UI REORGANIZATION mission — "Sonuçları Gör" (View Results),
+   * shown once Detail Enrichment reaches a terminal state. Explicit
+   * requirement: this button must ONLY switch to the Results tab — no
+   * fetch/merge/reset/process of any kind. Detail's own data is already
+   * hydrated into rawRows by the time a run is terminal (mergeDetailResults()
+   * already ran, from THIS same renderDetailProgress() call — see
+   * hydrateDetailResultsIfAny()'s own header comment for the full
+   * reasoning), so switchTab() is genuinely the only thing left to do. */
+  function handleDetailViewResultsClick() {
+    switchTab('results');
+  }
+
   /** DETAIL ENRICHMENT RESET (real production request) — a real, explicit
    * "Sıfırla" button. Confirms first (the exact real-production-requested
    * wording, via WSI18n so every locale gets its own correct translation
@@ -9662,7 +9908,13 @@
   }
 
   function renderDetailProgress(dsState) {
-    if (!dsState || dsState.runId !== currentDetailRunId) return;
+    // FINAL UI REORGANIZATION mission — cached purely so the sticky
+    // status bar (renderStickyStatus(), called at the end of this same
+    // function) can show live Detail progress without polling/re-
+    // deriving anything of its own; never used for any control-flow
+    // decision.
+    lastRenderedDetailState = (dsState && dsState.runId === currentDetailRunId) ? dsState : null;
+    if (!dsState || dsState.runId !== currentDetailRunId) { renderStickyStatus(); return; }
     els.dtProgressSection.hidden = false;
     // DETAIL ENRICHMENT RESET — always available whenever a real run
     // (terminal or still active) is being shown, not gated behind
@@ -9682,7 +9934,7 @@
     // recover; stops itself the instant a real terminal state is reached
     // (never leaks a timer past the job it was polling for).
     ensureDetailPollTimer(!isTerminal);
-    els.dtProgressBadge.textContent = dsState.status.toUpperCase();
+    els.dtProgressBadge.textContent = localizedStatusLabel(dsState.status);
     els.dtProgressBadge.className = 'ws-status-badge ws-status-' + dsState.status;
     var c = dsState.counts || {};
     var done = (c.completed || 0) + (c.partial || 0) + (c.failed || 0) + (c.skipped || 0);
@@ -9700,9 +9952,16 @@
       // already a subset of c.failed (see deepScrapeCounts), so it's
       // subtracted out of the displayed "errors" count here, never from
       // c.failed itself.
-      els.dtProgressText.textContent = WSI18n.t('detail.progressText', {
-        done: done, total: c.total || 0, success: c.completed || 0,
-        missing: (c.partial || 0) + (c.skipped || 0), errors: (c.failed || 0) - (c.timeouts || 0), timeouts: c.timeouts || 0, percent: pct
+      // FINAL MICRO UI POLISH (item 3): compact max-two-line presentation
+      // — same numbers as before, just split into two shorter
+      // WSI18n.t() lines instead of one long concatenated sentence (see
+      // dt-progress-text's own `white-space:pre-line` in popup.html,
+      // which is what makes this '\n' actually render as a line break).
+      // No information removed, none duplicated elsewhere.
+      els.dtProgressText.textContent = WSI18n.t('detail.progressLine1', {
+        done: done, total: c.total || 0, percent: pct
+      }) + '\n' + WSI18n.t('detail.progressLine2', {
+        success: c.completed || 0, missing: (c.partial || 0) + (c.skipped || 0), errors: (c.failed || 0) - (c.timeouts || 0), timeouts: c.timeouts || 0
       });
     }
     els.dtProgressCurrent.textContent = dsState.currentUrl ? WSI18n.t('detail.progressCurrent', { url: dsState.currentUrl }) : '';
@@ -9727,6 +9986,7 @@
       if (els.dtResumeBtn) els.dtResumeBtn.hidden = !(stuckCount > 0);
       if (els.dtRetryFailedBtn) els.dtRetryFailedBtn.hidden = !(c.failed > 0);
       if (els.dtNewRunBtn) els.dtNewRunBtn.hidden = false;
+      if (els.dtViewResultsBtn) els.dtViewResultsBtn.hidden = false;
       if (dsState.status === 'completed' && !detailChargedRunIds[dsState.runId]) {
         detailChargedRunIds[dsState.runId] = true;
         chargeRunCredit(dsState.runId);
@@ -9735,11 +9995,12 @@
       if (els.dtResumeBtn) els.dtResumeBtn.hidden = true;
       if (els.dtRetryFailedBtn) els.dtRetryFailedBtn.hidden = true;
       if (els.dtNewRunBtn) els.dtNewRunBtn.hidden = true;
+      if (els.dtViewResultsBtn) els.dtViewResultsBtn.hidden = true;
     }
+    renderStickyStatus();
   }
 
   function renderDetailSummary(dsState) {
-    var c = dsState.counts || {};
     var reasonCounts = {};
     Object.keys(dsState.results || {}).forEach(function (url) {
       var r = dsState.results[url];
@@ -9747,15 +10008,22 @@
     });
     var topReasons = Object.keys(reasonCounts).sort(function (a, b) { return reasonCounts[b] - reasonCounts[a]; }).slice(0, 3);
 
-    var lines = [];
-    lines.push(dsState.status === 'stopped' ? WSI18n.t('detail.summaryStopped') : dsState.status === 'error' ? WSI18n.t('detail.summaryError') : WSI18n.t('detail.summaryComplete'));
-    lines.push((c.total || 0) + ' ' + WSI18n.t('detail.summaryPages'));
-    lines.push(WSI18n.t('detail.summaryCounts', { success: c.completed || 0, missing: (c.partial || 0) + (c.skipped || 0), errors: c.failed || 0 }));
-    if (topReasons.length) {
-      lines.push('');
-      lines.push(WSI18n.t('detail.summaryReasons'));
-      topReasons.forEach(function (reason) { lines.push('  ' + reasonCounts[reason] + ' × ' + reason); });
+    // FINAL UI POLISH PASS: dt-progress-text (above, in renderDetailProgress)
+    // already shows the full "done / total • Successful: N • Missing: N •
+    // Errors: N • Timeouts: N • Progress: %N" breakdown, and dt-progress-
+    // badge already shows the terminal status itself — repeating
+    // "DETAY ZENGİNLEŞTİRME TAMAMLANDI" / "N benzersiz sayfa" /
+    // "Başarılı/Eksik/Hata" underneath (this block's old first 3 lines)
+    // was the exact reported completed-state duplication. Only the
+    // genuinely NEW information this block ever added — the top failure
+    // reasons breakdown — is kept; dsState/counts/handlers are untouched.
+    if (!topReasons.length) {
+      els.dtSummaryText.hidden = true;
+      els.dtSummaryText.textContent = '';
+      return;
     }
+    var lines = [WSI18n.t('detail.summaryReasons')];
+    topReasons.forEach(function (reason) { lines.push('  ' + reasonCounts[reason] + ' × ' + reason); });
     els.dtSummaryText.hidden = false;
     els.dtSummaryText.textContent = lines.join('\n');
   }
@@ -9918,7 +10186,12 @@
     var existingDeepScrapeRun = await localGet('ws_deepscrape_run');
     if (existingDeepScrapeRun && ['running', 'stopped', 'completed', 'error'].indexOf(existingDeepScrapeRun.status) !== -1) {
       currentDeepScrapeRunId = existingDeepScrapeRun.runId;
-      els.deepScrapePanel.hidden = true;
+      // RESULTS-TAB DEEP SCRAPE UI REMOVAL: #deepscrape-panel no longer
+      // exists — currentDeepScrapeRunId is still restored exactly as
+      // before (so renderDeepScrapeProgress()'s own runId check, merge,
+      // and trial-credit charging all still work for a legacy/in-flight
+      // run), only the now-absent panel's own hidden-toggle is guarded.
+      if (els.deepScrapePanel) els.deepScrapePanel.hidden = true;
       renderDeepScrapeProgress(existingDeepScrapeRun);
     }
 
@@ -9980,6 +10253,7 @@
     if (els.dtResumeBtn) els.dtResumeBtn.addEventListener('click', handleDetailResumeClick);
     if (els.dtRetryFailedBtn) els.dtRetryFailedBtn.addEventListener('click', handleDetailRetryFailedClick);
     if (els.dtNewRunBtn) els.dtNewRunBtn.addEventListener('click', handleDetailNewRunClick);
+    if (els.dtViewResultsBtn) els.dtViewResultsBtn.addEventListener('click', handleDetailViewResultsClick);
     if (els.dtResetBtn) els.dtResetBtn.addEventListener('click', handleDetailResetClick);
 
     els.addColumnBtn.addEventListener('click', handleAddColumn);
@@ -10008,6 +10282,10 @@
     if (els.baslaBtn) els.baslaBtn.addEventListener('click', handleStartLiveSession);
     if (els.bitirBtn) els.bitirBtn.addEventListener('click', handleFinishLiveSession);
     if (els.durdurBtn) els.durdurBtn.addEventListener('click', handleStopAutoPaginate);
+    // FINAL UI REORGANIZATION mission — the sticky status bar's own Stop
+    // button is wired to the EXACT SAME handler #durdur-btn already
+    // uses — never a second Stop implementation.
+    if (els.stickyStatusStopBtn) els.stickyStatusStopBtn.addEventListener('click', handleStopAutoPaginate);
     if (els.discoveryProcessAllBtn) els.discoveryProcessAllBtn.addEventListener('click', handleDiscoveryProcessAll);
     if (els.discoveryProcessFirstBtn) els.discoveryProcessFirstBtn.addEventListener('click', handleDiscoveryProcessFirst);
 

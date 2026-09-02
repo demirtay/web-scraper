@@ -239,8 +239,12 @@ function main() {
   // with an unambiguous error message. ----
   check('AUTO detection diagnostic tool is not reachable outside the isDevelopmentInstall()-gated panel', function () {
     var html = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.html'), 'utf8');
-    if (!/<div id="auto-diag-panel" hidden/.test(html)) throw new Error('#auto-diag-panel is not `hidden` by default in the shipped HTML');
-    var diagPanelMatch = html.match(/<div id="auto-diag-panel"[^>]*>[\s\S]*?<\/div>\s*<\/div>\s*<\/section>/);
+    // FINAL UI REORGANIZATION mission — #auto-diag-panel is now a
+    // <details> (joins the "▸ Geliştirici Araçları" convention every
+    // other dev panel uses), not a plain <div>; hidden/reveal gating is
+    // otherwise completely unchanged.
+    if (!/<details id="auto-diag-panel"[^>]*\bhidden\b/.test(html)) throw new Error('#auto-diag-panel is not `hidden` by default in the shipped HTML');
+    var diagPanelMatch = html.match(/<details id="auto-diag-panel"[^>]*>[\s\S]*?<\/details>/);
     if (!diagPanelMatch) throw new Error('could not find the #auto-diag-panel container in popup.html');
     var diagPanelHtml = diagPanelMatch[0];
     var diagControlIds = ['auto-diag-copy-btn', 'auto-diag-status', 'auto-diag-textarea'];
@@ -267,84 +271,60 @@ function main() {
     return diagControlIds.length + ' diagnostic controls confirmed gated inside #auto-diag-panel, reveal path confirmed to check isDevelopmentInstall()';
   });
 
-  // ---- Same reachability contract, mirrored for the active-session
-  // watcher's own dev-only diagnostic ("Copy Session Diagnostic"). ----
-  check('Active-session diagnostic tool is not reachable outside the isDevelopmentInstall()-gated panel', function () {
+  // ---- Same reachability contract, mirrored for the Detay tab's own
+  // Detail Field Picker activation diagnostic ("▸ Geliştirici Araçları"
+  // inside #tab-panel-detay). Never had a dedicated static check before
+  // this mission — added now for the same "production build hides all
+  // dev-only diagnostic UI" guarantee every other panel already has. ----
+  check('Detail picker diagnostic tool is not reachable outside the isDevelopmentInstall()-gated panel', function () {
     var html = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.html'), 'utf8');
-    if (!/<div id="session-diag-panel" hidden/.test(html)) throw new Error('#session-diag-panel is not `hidden` by default in the shipped HTML');
-    var diagPanelMatch = html.match(/<div id="session-diag-panel"[^>]*>[\s\S]*?<\/div>\s*\n\s*<!--/);
-    if (!diagPanelMatch) throw new Error('could not find the #session-diag-panel container in popup.html');
+    if (!/<details id="detail-pick-diag-panel"[^>]*\bhidden\b/.test(html)) throw new Error('#detail-pick-diag-panel is not `hidden` by default in the shipped HTML');
+    var diagPanelMatch = html.match(/<details id="detail-pick-diag-panel"[^>]*>[\s\S]*?<\/details>/);
+    if (!diagPanelMatch) throw new Error('could not find the #detail-pick-diag-panel container in popup.html');
     var diagPanelHtml = diagPanelMatch[0];
-    var diagControlIds = ['session-diag-copy-btn', 'session-diag-status', 'session-diag-textarea'];
+    var diagControlIds = ['detail-pick-diag-copy-btn', 'detail-pick-diag-status', 'detail-pick-diag-textarea'];
     diagControlIds.forEach(function (id) {
       var re = new RegExp('id="' + id + '"', 'g');
       var totalCount = (html.match(re) || []).length;
       var insideCount = (diagPanelHtml.match(re) || []).length;
       if (totalCount === 0) throw new Error('expected diagnostic control "' + id + '" was not found at all — has the harness moved?');
-      if (totalCount !== insideCount) throw new Error('diagnostic control "' + id + '" appears OUTSIDE the gated #session-diag-panel container — this is a production exposure risk');
+      if (totalCount !== insideCount) throw new Error('diagnostic control "' + id + '" appears OUTSIDE the gated #detail-pick-diag-panel container — this is a production exposure risk');
     });
 
     var popupJs = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.js'), 'utf8');
-    if (!/function revealSessionDiagPanelIfDev[\s\S]{0,300}isDevelopmentInstall/.test(popupJs)) {
-      throw new Error('revealSessionDiagPanelIfDev() no longer visibly gates on WSLicense.isDevelopmentInstall() — the diagnostic panel could become reachable in production');
+    if (!/function revealDetailPickDiagPanelIfDev[\s\S]{0,300}isDevelopmentInstall/.test(popupJs)) {
+      throw new Error('revealDetailPickDiagPanelIfDev() no longer visibly gates on WSLicense.isDevelopmentInstall() — the diagnostic panel could become reachable in production');
     }
-    ['handleCopySessionDiagnostic', 'formatSessionDiagnosticReport'].forEach(function (fn) {
-      ['background/background.js'].forEach(function (rel) {
-        var abs = path.join(PROJECT_ROOT, rel);
-        if (!fs.existsSync(abs)) return;
-        var src = fs.readFileSync(abs, 'utf8');
-        if (src.indexOf(fn) !== -1) throw new Error(fn + ' is referenced from ' + rel + ' — the diagnostic tool must only ever be reachable from the gated popup UI');
-      });
-    });
-    return diagControlIds.length + ' diagnostic controls confirmed gated inside #session-diag-panel, reveal path confirmed to check isDevelopmentInstall()';
+    return diagControlIds.length + ' diagnostic controls confirmed gated inside #detail-pick-diag-panel, reveal path confirmed to check isDevelopmentInstall()';
   });
 
-  // ---- Same reachability contract, mirrored for the pagination
-  // diagnostic ring buffer's own dev-only tool ("Copy Pagination
-  // Diagnostic") — added for the real production report of main
-  // discovery stalling on page 11; reads content/discovery.js's own
-  // persistent chrome.storage.local ring buffer directly. ----
-  check('Pagination diagnostic tool is not reachable outside the isDevelopmentInstall()-gated panel', function () {
+  // ---- FINAL UI REORGANIZATION mission — #session-diag-panel/
+  // #pagination-diag-panel/#health-check-panel are now consolidated
+  // inside ONE outer <details id="results-devtools-panel"> ("▸
+  // Geliştirici Araçları"), which is itself gated (hidden by default,
+  // only unhidden by revealResultsDevToolsPanelIfDev() after a real
+  // isDevelopmentInstall() check) — the group's own <summary> label must
+  // never be reachable in a production/store build either, not just its
+  // contents. One consolidated check replaces the previous 3 separate
+  // ones (each panel's own individual reveal-gate is still verified
+  // too), reflecting the new nested structure precisely rather than
+  // trying to pattern-match stale HTML shapes. ----
+  check('Results-tab dev-only diagnostics are not reachable outside the isDevelopmentInstall()-gated Developer Tools group', function () {
     var html = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.html'), 'utf8');
-    if (!/<div id="pagination-diag-panel" hidden/.test(html)) throw new Error('#pagination-diag-panel is not `hidden` by default in the shipped HTML');
-    var diagPanelMatch = html.match(/<div id="pagination-diag-panel"[^>]*>[\s\S]*?<\/div>\s*\n\s*<!--/);
-    if (!diagPanelMatch) throw new Error('could not find the #pagination-diag-panel container in popup.html');
-    var diagPanelHtml = diagPanelMatch[0];
-    var diagControlIds = ['pagination-diag-copy-btn', 'pagination-diag-status', 'pagination-diag-textarea'];
-    diagControlIds.forEach(function (id) {
-      var re = new RegExp('id="' + id + '"', 'g');
-      var totalCount = (html.match(re) || []).length;
-      var insideCount = (diagPanelHtml.match(re) || []).length;
-      if (totalCount === 0) throw new Error('expected diagnostic control "' + id + '" was not found at all — has the harness moved?');
-      if (totalCount !== insideCount) throw new Error('diagnostic control "' + id + '" appears OUTSIDE the gated #pagination-diag-panel container — this is a production exposure risk');
+    if (!/<details id="results-devtools-panel"[^>]*\bhidden\b/.test(html)) throw new Error('#results-devtools-panel is not `hidden` by default in the shipped HTML');
+    var groupMatch = html.match(/<details id="results-devtools-panel"[^>]*>[\s\S]*?<\/details>/);
+    if (!groupMatch) throw new Error('could not find the #results-devtools-panel container in popup.html');
+    var groupHtml = groupMatch[0];
+
+    var innerPanels = ['session-diag-panel', 'pagination-diag-panel', 'health-check-panel'];
+    innerPanels.forEach(function (panelId) {
+      var panelHiddenRe = new RegExp('<div id="' + panelId + '"[^>]*\\bhidden\\b');
+      if (!panelHiddenRe.test(groupHtml)) throw new Error('#' + panelId + ' is not `hidden` by default inside #results-devtools-panel');
     });
 
-    var popupJs = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.js'), 'utf8');
-    if (!/function revealPaginationDiagPanelIfDev[\s\S]{0,300}isDevelopmentInstall/.test(popupJs)) {
-      throw new Error('revealPaginationDiagPanelIfDev() no longer visibly gates on WSLicense.isDevelopmentInstall() — the diagnostic panel could become reachable in production');
-    }
-    ['handleCopyPaginationDiagnostic', 'formatPaginationDiagnosticReport'].forEach(function (fn) {
-      ['background/background.js'].forEach(function (rel) {
-        var abs = path.join(PROJECT_ROOT, rel);
-        if (!fs.existsSync(abs)) return;
-        var src = fs.readFileSync(abs, 'utf8');
-        if (src.indexOf(fn) !== -1) throw new Error(fn + ' is referenced from ' + rel + ' — the diagnostic tool must only ever be reachable from the gated popup UI');
-      });
-    });
-    return diagControlIds.length + ' diagnostic controls confirmed gated inside #pagination-diag-panel, reveal path confirmed to check isDevelopmentInstall()';
-  });
-
-  // ---- Same reachability contract, mirrored for the SELF-DIAGNOSTICS /
-  // HEALTH CHECK ("Sağlık Kontrolü") dev-only tool — mission item 12's
-  // own explicit "production/store build hides all development-only
-  // diagnostic UI" test proof for this panel. ----
-  check('Health Check diagnostic tool is not reachable outside the isDevelopmentInstall()-gated panel', function () {
-    var html = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.html'), 'utf8');
-    if (!/<div id="health-check-panel" hidden/.test(html)) throw new Error('#health-check-panel is not `hidden` by default in the shipped HTML');
-    var diagPanelMatch = html.match(/<div id="health-check-panel"[^>]*>[\s\S]*?<\/div>\s*\n\s*<!--/);
-    if (!diagPanelMatch) throw new Error('could not find the #health-check-panel container in popup.html');
-    var diagPanelHtml = diagPanelMatch[0];
     var diagControlIds = [
+      'session-diag-copy-btn', 'session-diag-status', 'session-diag-textarea',
+      'pagination-diag-copy-btn', 'pagination-diag-status', 'pagination-diag-textarea',
       'health-check-run-btn', 'health-check-copy-report-btn', 'health-check-copy-history-btn', 'health-check-clear-btn',
       'health-check-overall', 'health-check-main', 'health-check-pagination', 'health-check-ui-sync',
       'health-check-storage', 'health-check-detail', 'health-check-last-progress', 'health-check-current-page',
@@ -353,16 +333,24 @@ function main() {
     diagControlIds.forEach(function (id) {
       var re = new RegExp('id="' + id + '"', 'g');
       var totalCount = (html.match(re) || []).length;
-      var insideCount = (diagPanelHtml.match(re) || []).length;
+      var insideCount = (groupHtml.match(re) || []).length;
       if (totalCount === 0) throw new Error('expected diagnostic control "' + id + '" was not found at all — has the harness moved?');
-      if (totalCount !== insideCount) throw new Error('diagnostic control "' + id + '" appears OUTSIDE the gated #health-check-panel container — this is a production exposure risk');
+      if (totalCount !== insideCount) throw new Error('diagnostic control "' + id + '" appears OUTSIDE the gated #results-devtools-panel container — this is a production exposure risk');
     });
 
     var popupJs = fs.readFileSync(path.join(PROJECT_ROOT, 'popup/popup.js'), 'utf8');
-    if (!/function revealHealthCheckPanelIfDev[\s\S]{0,300}isDevelopmentInstall/.test(popupJs)) {
-      throw new Error('revealHealthCheckPanelIfDev() no longer visibly gates on WSLicense.isDevelopmentInstall() — the diagnostic panel could become reachable in production');
-    }
-    ['handleCopyHealthReport', 'handleCopyHealthHistory', 'handleClearHealthDiagnostics', 'gatherHealthCheckInput'].forEach(function (fn) {
+    [
+      'revealResultsDevToolsPanelIfDev', 'revealSessionDiagPanelIfDev',
+      'revealPaginationDiagPanelIfDev', 'revealHealthCheckPanelIfDev'
+    ].forEach(function (fnName) {
+      var re = new RegExp('function ' + fnName + '[\\s\\S]{0,300}isDevelopmentInstall');
+      if (!re.test(popupJs)) throw new Error(fnName + '() no longer visibly gates on WSLicense.isDevelopmentInstall() — the diagnostic panel could become reachable in production');
+    });
+    [
+      'handleCopySessionDiagnostic', 'formatSessionDiagnosticReport',
+      'handleCopyPaginationDiagnostic', 'formatPaginationDiagnosticReport',
+      'handleCopyHealthReport', 'handleCopyHealthHistory', 'handleClearHealthDiagnostics', 'gatherHealthCheckInput'
+    ].forEach(function (fn) {
       ['background/background.js'].forEach(function (rel) {
         var abs = path.join(PROJECT_ROOT, rel);
         if (!fs.existsSync(abs)) return;
@@ -370,7 +358,7 @@ function main() {
         if (src.indexOf(fn) !== -1) throw new Error(fn + ' is referenced from ' + rel + ' — the diagnostic tool must only ever be reachable from the gated popup UI');
       });
     });
-    return diagControlIds.length + ' diagnostic controls confirmed gated inside #health-check-panel, reveal path confirmed to check isDevelopmentInstall()';
+    return diagControlIds.length + ' diagnostic controls confirmed gated inside #results-devtools-panel, every reveal path confirmed to check isDevelopmentInstall()';
   });
 
   // ---- V1 FINAL PART B spec #45: automated translation-coverage audit.

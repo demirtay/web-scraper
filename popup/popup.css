@@ -32,6 +32,16 @@ body {
   padding: 14px 16px 16px;
 }
 
+/* FINAL UI POLISH PASS (mission section 6) — reserves the sticky status
+   bar's own rendered height as extra bottom padding on #app whenever the
+   bar is visible (toggled by popup.js's setStickyStatusBarVisible()), so
+   the last table rows/export buttons/accordion headers/Detail actions/
+   Dev Tools controls never end up hidden behind it. See .ws-sticky-status
+   below for the bar's own box model this value is sized against. */
+#app.ws-has-sticky-status {
+  padding-bottom: 52px;
+}
+
 /* ---- Tab Navigation (V1.13) ---- */
 
 .ws-tab-nav {
@@ -146,6 +156,96 @@ details.ws-advanced[open] summary {
   margin-bottom: 4px;
 }
 
+/* ---- FINAL UI REORGANIZATION mission — a single ▸/▾ collapse marker
+   applied uniformly to every collapsible <details> in the popup (both
+   the small nested "Advanced (...)" groups that already used
+   details.ws-advanced, and the new top-level "▸ Section Name" groups
+   added by this mission, which reuse the exact same class for full
+   visual consistency rather than inventing a second style). Pure CSS —
+   no JS, no new state; native <details>/<summary> already owns open/
+   closed entirely. ---- */
+details.ws-advanced > summary::before {
+  content: '▸ ';
+  display: inline-block;
+}
+
+details.ws-advanced[open] > summary::before {
+  content: '▾ ';
+}
+
+details.ws-advanced > summary {
+  list-style: none;
+}
+
+details.ws-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A top-level collapsible group (Saved Scrapers / Advanced Settings /
+   Developer Tools / Change Tracking / Research Package / Deep Scraping /
+   Detail Templates) reads slightly more prominent than a small nested
+   "Advanced (...)" sub-group — same class, one modifier. */
+details.ws-advanced.ws-section-top > summary {
+  font-size: 11.5px;
+  padding: 4px 0;
+}
+
+/* ---- Developer Tools — a visibly distinct, consistently-styled
+   container for every dev-only diagnostic panel consolidated under one
+   ▸ Geliştirici Araçları per tab (mission section 3). Still gated
+   exactly as before by popup.js's own isDevelopmentInstall() checks —
+   this class only affects appearance, never reachability. ---- */
+.ws-devtools-panel {
+  margin-top: 10px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+}
+
+.ws-devtools-panel > .ws-devtools-item + .ws-devtools-item {
+  margin-top: 10px;
+  border-top: 1px dashed #e5e7eb;
+  padding-top: 8px;
+}
+
+/* ---- Global sticky status bar (mission section 6) — a compact,
+   read-only footer that mirrors already-rendered state; it never owns
+   or mutates any run, and its one action button (DURDUR) is wired to
+   the exact same existing handler #durdur-btn already uses. ---- */
+.ws-sticky-status {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #111827;
+  color: #f9fafb;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 6;
+  box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.ws-sticky-status[hidden] {
+  display: none;
+}
+
+.ws-sticky-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-sticky-status-stop-btn {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
 .ws-notice {
   background: #fef3c7;
   color: #92400e;
@@ -156,6 +256,65 @@ details.ws-advanced[open] summary {
 
 .ws-section {
   margin-bottom: 12px;
+}
+
+/* ---- FINAL UI REORGANIZATION mission — TOP SUMMARY CARD (Results tab):
+   visually unifies the existing status/discovery lines (each already
+   individually shown/hidden by popup.js's own render functions, so no
+   statistic is ever duplicated — only visually scattered before this).
+   Empty when no status line inside is currently visible; :empty relies
+   on those <p>/<div> children carrying `hidden` correctly, which they
+   already did before this card existed. ---- */
+.ws-summary-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.ws-summary-card .ws-note {
+  margin: 0 0 4px;
+}
+
+.ws-summary-card .ws-note:last-child {
+  margin-bottom: 0;
+}
+
+/* FINAL UI POLISH PASS (mission section 7) — compact "SON KOŞU"/"Last
+   Run" card: same visual family as .ws-summary-card, deliberately
+   smaller/quieter since it's a secondary pointer back to a previous
+   run, not the tab's primary content (see #scrape-last-run-card's own
+   comment in popup.html for what stays unchanged inside it). */
+.ws-last-run-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ws-last-run-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #6b7280;
+  flex: none;
+}
+
+.ws-last-run-card .ws-note {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ws-last-run-card .ws-btn {
+  flex: none;
 }
 
 .ws-section-title {
@@ -542,6 +701,45 @@ details.ws-advanced[open] summary {
   width: 18px;
   text-align: center;
   cursor: default;
+}
+
+/* FINAL MICRO UI POLISH (item 2) — the Veri Çek tab's "ÖN İZLEME" table
+   (#setup-preview-table, inside #setup-preview-wrap) previously had NO
+   dedicated styling at all, rendering with the browser's default
+   zero-padding table look — headers like "Link Title Image FIYAT ESKI
+   FIYAT SATICI KARGO" ran together with no visual separation. Spacing/
+   padding/alignment only: same column order, same values, same
+   .ws-table-wrap horizontal-scroll behavior (unchanged) — nothing about
+   what's extracted or previewed changes, only how it reads. */
+#setup-preview-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+#setup-preview-table th,
+#setup-preview-table td {
+  text-align: left;
+  padding: 7px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  border-right: 1px solid #f0f0f0;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#setup-preview-table th:last-child,
+#setup-preview-table td:last-child {
+  border-right: none;
+}
+
+#setup-preview-table th {
+  background: #f9fafb;
+  position: sticky;
+  top: 0;
+  font-weight: 700;
+  color: #374151;
 }
 
 .ws-note {

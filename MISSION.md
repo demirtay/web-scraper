@@ -1,5 +1,317 @@
 # Current Mission
 
+## REAL CHROME VERIFIED v1.1.0
+
+- Etsy: 22 pages / 1263 unique records
+- Detail: 1263 processed / 1175 successful / 88 missing / 0 errors
+- enriched Excel export verified
+- final popup UI verified
+- Results Deep Scrape duplicate navigation removed
+- dedicated Detail tab retained
+
+**Status: RELEASE CHECKPOINT — tagged `v1.1.0-verified`.** Version
+bumped 1.0.2 → 1.1.0 (manifest.json/package.json/package-lock.json, no
+duplicate/inconsistent version values anywhere else in the repo — see
+this checkpoint's own commit for the exact verification). No feature/
+business-logic change accompanies this bump — pure checkpoint of the
+already-verified work below (FINAL MICRO UI POLISH + RESULTS-TAB DEEP
+SCRAPE LAUNCHER REMOVAL sections). Tests at checkpoint time: 27 unit
+test files, 1054 assertions, 0 failures, 0 crashed; release-check 19/19.
+
+---
+
+## RESULTS-TAB DEEP SCRAPE LAUNCHER REMOVAL — UI dedup, awaiting Chrome visual verification
+
+**Status: IMPLEMENTED, awaiting Chrome visual verification.** Removed
+ONLY the "▸ Derin Veri Çekme" / "Deep Scraping" collapsed group from the
+Results tab (the whole `<details>` block: `#toggle-deepscrape-btn`,
+`#deepscrape-panel` and every `#ds-*` config field inside it, `#ds-
+progress-section`) — a duplicate entry point for the same workflow the
+top-level Detay tab already owns.
+
+**Root risk found and fixed:** the OLD Results-tab panel and the NEW
+Detay tab share the exact same background.js engine AND the exact same
+`ws_deepscrape_run`/`ws_deepscrape_fields` storage keys (by original
+design — see the Detay tab's own header comment). Several popup.js
+functions wrote to the removed `#ds-*` elements **unconditionally** —
+most critically, `init()`'s own restore-an-in-flight-run block (`var
+existingDeepScrapeRun = await localGet('ws_deepscrape_run'); if
+(existing...) { ...; els.deepScrapePanel.hidden = true; renderDeepScrapeProgress(...); }`)
+runs on **every popup open** whenever `ws_deepscrape_run` has ever been
+populated by ANYTHING — including a real Detail Enrichment run, since
+they share the key. A naive HTML-only deletion would have made the
+popup throw a TypeError on open for any user who had ever run Detail
+Enrichment or the old panel. Fixed by adding `if (els.dsXxx)` guards
+(matching this file's own established idiom) around every now-orphaned
+DOM write in `renderDeepScrapeProgress()`, `renderDeepScrapeSummary()`,
+`checkForPendingDetailFieldPicks()`, and the `init()` restore block —
+`renderDeepScrapePanel()` already had its own top-of-function guard.
+**No function was deleted** — `mergeDeepScrapeResults()`, trial-credit
+charging, and `currentDeepScrapeRunId` restoration are all still fully
+intact and unconditional (pure state, zero DOM dependency), so a
+legacy/in-flight run started before this change still merges/charges
+correctly; only the now-absent UI writes became null-safe.
+
+**Detay tab, Detail Enrichment's own storage/config/merge/hydration
+(`detailConfig`/`currentDetailRunId`/`mergeDetailResults`/
+`hydrateDetailResultsIfAny`/`ws_live_detail_field_picks`), exports,
+scraping/discovery/pagination, and every other tab/section named in the
+mission are completely untouched** — confirmed via `git diff --stat HEAD
+-- content/ background/` (empty) and the new test's own explicit proofs.
+
+**Tests updated (existing UI expectations, not functionality):**
+`final-ui-reorganization.test.js` — removed its 2 assertions that
+expected `#toggle-deepscrape-btn`/`deepScrape.groupLabel` to still
+exist (documented inline why). **New:**
+`tests/unit/deepscrape-results-launcher-removal.test.js` (81 assertions)
+— proves the removal is real (not relocated), Detay stays fully
+functional, every underlying function is still defined, and — the
+important one — a real popup boot with a legacy `ws_deepscrape_run`
+record (and a live storage.onChanged update for it) does NOT throw.
+
+**Test totals:** 27 unit test files, 1054 assertions, 0 failures, 0
+crashed; release-check 19/19; full FAST: PASS. No long-running browser
+E2E run (not requested for this change).
+
+**Files changed:** `popup/popup.html`, `popup/popup.js`,
+`tests/unit/final-ui-reorganization.test.js`,
+`tests/unit/deepscrape-results-launcher-removal.test.js` (new).
+`content/`/`background/` untouched. Not committed/pushed — awaiting
+Chrome visual verification.
+
+---
+
+## FINAL MICRO UI POLISH — presentation/i18n only, awaiting final Chrome visual approval
+
+**Status: IMPLEMENTED, awaiting final Chrome visual approval.** UI/i18n
+only — `content/`/`background/` byte-for-byte untouched (confirmed via
+`git diff --stat HEAD -- content/ background/` — empty). Builds directly
+on the FINAL UI POLISH PASS section below.
+
+**1. Last Run card:** `#scrape-status-text`'s captured-state line changed
+from "{count} sonuç çekildi." to the compact `{count} kayıt • {status}`
+form, built from the exact same `rawRows.length` value and the existing
+`status.completed` key everything else already uses — no new counter.
+
+**2. Veri Çek ÖN İZLEME column spacing:** `#setup-preview-table` had zero
+dedicated CSS at all (rendering at the browser's default zero-padding
+look, which is why headers ran together). Added padding (7px 12px) +
+column-separator borders + a sticky header, mirroring `#preview-table`'s
+existing pattern. Column order/widths/extraction/horizontal-scroll
+behavior all untouched.
+
+**3. Detail completion metrics — compact two-line presentation:**
+`dt-progress-text` now renders `detail.progressLine1` ("{done}/{total}
+sayfa • İlerleme: %{percent}") and `detail.progressLine2` ("Başarılı: N
+• Eksik: N • Hata: N • Zaman aşımı: N") joined by `\n`, with
+`white-space:pre-line` added so it actually renders as two lines. Same
+numbers as the old one-line `detail.progressText` (now unused, left in
+place harmlessly). The sticky Detail status bar is a separate render
+path (`renderStickyStatus()`) and was not touched — no duplication.
+
+**4. Remaining localization — finished properly this time.** ~250 new
+keys across all 6 locales (589 total en keys, up from ~340 last pass; 0
+missing in any locale, confirmed both by a direct coverage script and
+release-check's own 100% check). Covers, beyond the ZIP/download
+progress strings named explicitly:
+  - The full `setStatus()` surface (128 distinct call sites → `msg.*`
+    keys) across Columns/Auto Detect/Structured Data/Templates/Pagination/
+    Run Modes/Saved Scrapers/Transforms/Preview/Filter/Sort/Export/
+    Downloads/Research Bundle/Snapshots/Detail setup.
+  - ZIP progress ("Building ZIP…"/"Ready"/"Cancelled."/"Failed: N") and
+    the full download-summary breakdown (Image/File counts, duplicates/
+    invalid/empty-skipped, estimated names) — both `bulk download` and
+    `Research Bundle` panels (they share the same `zipProgressLines()`).
+  - Templates row actions (Preview/Rename/Duplicate/Export/Delete,
+    Custom/Built-in badge) and Saved Scrapers row actions (Run/Load/
+    Rename/Delete), Snapshots manage-row (date — N rows, Hide/Manage).
+  - The **Monitor tab** in full (explicitly in-scope per i18n-data.js's
+    own documented V1 scope note, which names "monitor" directly) —
+    interval labels, ERROR/CHANGED/SUCCESS/NEVER RUN/RUNNING badges,
+    the Monitoring Summary line, per-card status/last-run/next-run text,
+    Enable/Run Now/Disable/History/Clear History buttons, notify
+    tooltip, per-run history detail line.
+  - Confirm() dialogs: Reset Columns, Delete Template, Delete Scraper
+    (the full 4-line consequence text), Clear Monitoring History, Reset
+    Transforms.
+  - Transform list Remove/Move up/Move down buttons (structural list
+    controls, NOT `describeTransform()`'s own per-operation descriptions
+    — those, plus Auto/Deep-Scrape sub-field configuration forms, remain
+    the one deliberately-out-of-scope area per this project's own
+    documented, pre-existing V1 i18n policy — see i18n-data.js's header
+    comment).
+  - Detail's "Alanları Test Et" sample-test results (Testing N pages…/
+    Page N:/Failed/Missing), the Deep Scrape workload summary line,
+    Research Bundle preview (Rows/Images/Files/Manifest formats), the
+    snapshot-comparison summary, and the Settings license-verification
+    note (revoked/simulated/verified-N-days-ago/verified-at-activation —
+    the "QA:"-prefixed dev license switcher itself stays English, still
+    correctly gated behind `isDevelopmentInstall()`).
+  - Applied via two small, throwaway, self-verifying migration scripts
+    (exact literal-substring replacement with an expected-occurrence-
+    count check per mapping — never a regex, never silently partial;
+    deleted immediately after running) rather than ~190 manual edits, to
+    keep the mechanical part of this pass fast and mistake-free.
+
+**Tests:** 26 unit test files, 975 assertions, 0 failures, 0 crashed (178
+new, in `tests/unit/final-micro-polish.test.js`); release-check 19/19;
+full FAST: PASS. No long-running browser E2E run (per this mission's own
+explicit instruction not to).
+
+**Files changed this pass:** `popup/popup.html`, `popup/popup.css`,
+`popup/popup.js`, `utils/i18n-data.js`, `tests/unit/final-micro-polish.test.js`
+(new). `content/`/`background/` untouched. Not committed/pushed —
+awaiting final Chrome visual approval.
+
+---
+
+## FINAL UI POLISH PASS — presentation only, awaiting real Chrome visual approval
+
+**Status: IMPLEMENTED, awaiting final Chrome visual approval.** UI-only —
+`content/`/`background/` byte-for-byte untouched (confirmed via
+`git diff --stat HEAD -- content/ background/` — empty). Builds directly
+on the FINAL UI REORGANIZATION section below (same tab structure, same
+collapsed groups, same sticky bar — this pass only refines it).
+
+**1. "Verileri Çek" duplicate (resolved: KEPT, not removed).** Traced
+both handlers: `#preview-btn` → `handlePreview()` (a single-page
+`RUN_EXTRACTION` only — no session, no discovery, no tab switch; shown
+only in manual "Current Page" Run Mode) vs `#basla-btn` → the unrelated
+`handleStartLiveSession()` (always creates/persists a live session,
+starts the passive watcher, starts the automatic discovery engine, then
+switches to Results). Genuinely different actions → kept `#preview-btn`,
+relocated it from beside Auto Detect/Structured Data/Templates down into
+`#run-section`, directly next to its real mutually-exclusive counterpart
+`#start-run-btn` (`onRunModeChanged()` already treated them as one pair —
+now they read that way visually too), and reworded its label (all 6
+locales) from "Extract Data"-style text to "Preview This Page"/"Bu
+Sayfayı Önizle" so it no longer reads as a second BAŞLA. Same id, same
+handler, zero logic touched.
+
+**2. Results summary de-duplication.** Root cause: `discovery-status-
+line1`/`line2` (found/pages) stayed visible even after a processing
+selection was made, while the summary panel below ALSO showed
+`discovery-summary-found` (the literal same key/count) and
+`discovery-summary-processed` (near-duplicate of the top card's `results-
+status-text`/`live-session-status`). Fix (all presentation, zero counter/
+calculation touched): `results-status-text`/`live-session-status` now
+hide whenever the richer discovery panel is showing;
+`discovery-summary-found` now always stays hidden (its info is
+`discovery-status-line1`, never removed, always kept current);
+`discovery-summary-processed` hides ONLY when it would exactly duplicate
+the found count (an "ALL" selection) — a genuinely different "FIRST N"
+count is never hidden, so no real information is ever lost;
+`discovery-status-line3` ("Durum: …") is relocated to the end of the
+panel and no longer force-hidden once a selection exists — it's now the
+compact card's one persistent status line.
+
+**3. Detail completed-state duplication removed.** `renderDetailSummary()`
+used to re-state status/page-count/success-missing-error-counts that
+`dt-progress-text` + the status badge already show. Those 3 lines are
+gone; the one genuinely new piece of information the block ever added —
+top failure reasons — is unchanged and still shown when present (hidden
+entirely when there are none, since nothing else is left to show).
+dsState/counts/handlers untouched.
+
+**4. Remaining hardcoded English moved through the 6-locale i18n system.**
+~40 new keys across all 6 locales (`preview.*`, `changes.truncatedNote`,
+`autoMode.*`, `pagination.*`, `snapshots.*`, `transform.*`,
+`column.entireRow`, `download.*`, `zipKind.*`, `research.*`,
+`templates.*`, `status.starting`, `sticky.*`, `workflow.lastRun`) —
+covers the two literally-named examples (row/changes truncation notes,
+the anomaly-mismatch legend) plus the other persistently-rendered
+informational text found in the same style across the Scrape/Results
+tabs (Auto Detect summary, pagination auto-detect summary, Snapshots
+footer, Transform preview, "Entire Row" pickers, Download/Research
+Bundle progress, Template preview notes). **Not fully exhaustive** — the
+Download/Files preview's own multi-line `buildDownloadSummaryText()`
+breakdown and the ZIP progress panel's "Building ZIP…/Ready/Cancelled"
+lines are still hardcoded English; flagged here rather than rushed,
+since covering them correctly would mean a second, dedicated pass.
+release-check confirms 100% key coverage across all 6 locales for every
+key that does exist.
+
+**5/6. Sticky status bar is now tab-aware + never covers real content.**
+`renderStickyStatus()` now reads the existing `activeTab` — Detail
+running/stopping still takes precedence from ANY tab (preserves "know
+it's still working, Stop from anywhere"), but once Detail reaches a
+terminal state it only keeps showing while the user is actually on the
+Detay tab; every other tab falls through to the ordinary main-scrape/
+session line. `switchTab()` now also calls `renderStickyStatus()` so a
+plain tab switch alone updates it, not just a state change. New
+`setStickyStatusBarVisible()` helper centralizes the bar's own
+`hidden` toggle and mirrors it onto `#app.ws-has-sticky-status`, which
+reserves the bar's own height as bottom padding — so the bar only ever
+sits over its own reserved space, never over the last table rows/export
+buttons/accordion headers/Detail actions/Dev Tools controls. No new
+timer, no new state machine, no DURDUR duplication.
+
+**7. "SON KOŞU"/Last Run compact card.** The old always-rendered
+`scrape-status-text` + full-width "View Results →" button (which visually
+dominated the top of Veri Çek before Columns/Preview/BAŞLA) is now
+wrapped in `#scrape-last-run-card`, hidden by default and shown ONLY once
+`rawRows.length > 0` — the exact same condition the button's own
+visibility already used. Same ids, same handler
+(`switchTab('results')` only), same underlying count text/logic — only
+restyled smaller/secondary and made conditional, so Sütunlar → Ön
+İzleme → BAŞLA is the first thing a fresh setup sees.
+
+**Tests:** 25 unit test files, 797 assertions, 0 failures, 0 crashed (47
+new, in `tests/unit/final-ui-polish-pass.test.js`); release-check 19/19;
+full FAST: PASS. No long-running browser E2E run (per this mission's own
+explicit instruction not to).
+
+**Files changed this pass:** `popup/popup.html`, `popup/popup.css`,
+`popup/popup.js`, `utils/i18n-data.js`, `tests/unit/final-ui-polish-pass.test.js` (new).
+`content/`/`background/` untouched. Not committed/pushed — awaiting real
+Chrome visual approval per the mission's own explicit instruction.
+
+---
+
+## FINAL UI REORGANIZATION — VERİ ÇEK / SONUÇLAR / DETAY, no business logic changed
+
+**Status: IMPLEMENTED, awaiting real Chrome visual review.** UI-only —
+`content/` and `background/` are byte-for-byte untouched (confirmed via
+`git diff --stat`). Every change is popup.html/popup.css/popup.js
+(accordion/tab-switch/render-only)/i18n-data.js/release-check.js.
+
+**Summary:** Results tab dev diagnostics (session/pagination/health-
+check) consolidated into one gated `<details id="results-devtools-
+panel">` ("▸ Geliştirici Araçları"); the Scrape/Detay tabs' own single
+dev panels (`auto-diag-panel`/`detail-pick-diag-panel`) converted from
+`<div>` to `<details>` for the same collapse convention (zero JS
+change — `hidden` is independent of `open`). "Değişiklik Takibi"/"Derin
+Veri Çekme"/"Araştırma Paketi" wrapped in collapsed `<details>` groups.
+The duplicated "Şimdi ne yapmak istersiniz?" card removed — its one
+truly-duplicate button deleted (100% redundant with the existing "⚙
+Export Options" chip), its other two actions (Monitor/Research)
+relocated with their exact original handlers unchanged. New "Sonuçları
+Gör" button on the Detay tab's completed state — verified by test to
+send zero messages, only `switchTab('results')`. New global sticky
+status bar — read-only, derives from existing render state, its Stop
+button wired to the same `handleStopAutoPaginate` `#durdur-btn` already
+uses (verified by test to produce an identical message sequence).
+Mixed-language status badges (`.toUpperCase()` raw enum text) replaced
+with a new `localizedStatusLabel()` i18n helper across all 6 badge
+sites; the hardcoded "DEEP SCRAPE COMPLETE" string now localized.
+
+**One deliberate deviation (reported, not silently done):** the OUTER
+`#scrape-advanced-panel` ("Gelişmiş") was left as the always-visible
+`<div>` it already was, NOT re-collapsed into a `<details>` — its own
+existing comment documents that this was previously a `<details>` and
+was deliberately converted away from one as "a real regression fix";
+reverting that without knowing the original regression's exact cause
+was judged too risky for a UI-only mission. The mission's own "▸
+Gelişmiş Ayarlar" request is instead satisfied by the Run Mode
+sub-section, which already was (and remains) a real collapsed
+`<details id="run-section-advanced">`.
+
+**Tests:** 24 unit test files, 750 assertions, 0 failures, 0 crashed
+(82 new, in `tests/unit/final-ui-reorganization.test.js`).
+`release-check`: 19/19. Full FAST: PASS.
+
+---
+
 ## DETAIL ENRICHMENT RESULTS HYDRATION ON POPUP REOPEN — real production bug
 
 **Status: REAL-CHROME VERIFIED — 2026-08-31.**

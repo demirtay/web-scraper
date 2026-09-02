@@ -54,14 +54,28 @@
             <span class="ws-workflow-step-arrow">→</span>
             <span class="ws-workflow-step" data-step="3" data-i18n="workflow.step3">3. Review Results</span>
           </div>
-          <p id="scrape-status-text" class="ws-note ws-workflow-status"></p>
           <ol id="first-run-help" class="ws-note ws-first-run-help" hidden>
             <li data-i18n="firstRunHelp.item1">Add or auto-detect columns</li>
             <li data-i18n="firstRunHelp.item2">Preview the page</li>
             <li data-i18n="firstRunHelp.item3">Review results</li>
             <li data-i18n="firstRunHelp.item4">Save the scraper if desired</li>
           </ol>
-          <button id="scrape-view-results-btn" class="ws-btn ws-btn-primary ws-btn-block" hidden data-i18n="workflow.viewResults">View Results →</button>
+          <!-- FINAL UI POLISH PASS (mission section 7) — "SON KOŞU" /
+               "Last Run" compact card: same #scrape-status-text (count
+               text, unchanged) and #scrape-view-results-btn (same id,
+               same handler — switches to Results only), only now wrapped
+               as a small labeled card instead of a full-width paragraph +
+               full-width primary button, and only ever shown at all once
+               there IS a previous run to link to (updateScrapeWorkflowStatus()
+               keeps #scrape-last-run-card hidden for the empty/ready
+               states, exactly where it previously rendered a bare status
+               line with no button) — so Sütunlar → Ön İzleme → BAŞLA stays
+               the dominant, undistracted hierarchy for a fresh setup. -->
+          <div id="scrape-last-run-card" class="ws-last-run-card" hidden>
+            <div class="ws-last-run-label" data-i18n="workflow.lastRun">Last Run</div>
+            <p id="scrape-status-text" class="ws-note ws-workflow-status"></p>
+            <button id="scrape-view-results-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="workflow.viewResults">View Results</button>
+          </div>
         </section>
 
         <!-- ============ V1 SIMPLIFIED SESSION WORKFLOW — primary path ============
@@ -93,6 +107,7 @@
              ENTIRELY from each column's own sampleValue captured at pick
              time (see content/content.js), never a fresh page scan. -->
         <div id="setup-preview-wrap" class="ws-table-wrap" hidden>
+          <div class="ws-section-title" data-i18n="preview.title">Preview</div>
           <table id="setup-preview-table"></table>
         </div>
 
@@ -165,11 +180,29 @@
           <button id="templates-btn" class="ws-chip-btn" data-i18n="columns.templates">📋 Templates</button>
         </div>
 
-        <!-- "Verileri Çek" (Preview) / "Sütunları Sıfırla" (Reset Columns)
-             — relocated here from the very end of the old advanced
-             section (were #preview-btn/#reset-btn there); same ids, same
-             handlers (handlePreview/handleReset), completely unchanged. -->
-        <button id="preview-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="scrape.preview">Preview</button>
+        <!-- "Sütunları Sıfırla" (Reset Columns) — relocated here from the
+             very end of the old advanced section (was #reset-btn there);
+             same id, same handler (handleReset), completely unchanged.
+             FINAL UI POLISH PASS ("Verileri Çek" duplicate resolution):
+             #preview-btn (handlePreview) used to sit right here, directly
+             under Auto Detect/Structured Data/Templates — visually
+             reading as a second top-level "run" button sitting right next
+             to BAŞLA, even though it performs a genuinely different,
+             narrower action (a single-page preview extraction scoped to
+             manual "Current Page" Run Mode only — no live session, no
+             discovery, no tab switch; see handlePreview() in popup.js).
+             It is NOT a duplicate of BAŞLA (handleStartLiveSession, which
+             always creates/persists a live session, starts the passive
+             watcher, and starts the automatic discovery engine) and was
+             therefore kept, not removed — only relocated down into
+             #run-section below, right next to #start-run-btn (the exact
+             same mutually-exclusive pair onRunModeChanged() already
+             treats them as: #preview-btn shown only for "Current Page"
+             mode, #start-run-btn shown for every other mode), so its
+             distinct, manual/advanced purpose reads clearly from where it
+             now sits instead of looking like a second BAŞLA. Same id,
+             same handler, only its DOM position and label text changed
+             (see scrape.preview's new copy in utils/i18n-data.js). -->
         <button id="reset-btn" class="ws-btn ws-btn-danger ws-btn-block" data-i18n="scrape.resetColumns">Reset Columns</button>
 
         <!-- ============ AUTO MODE ============
@@ -218,12 +251,18 @@
                  production copy. See scripts/release-check.js for the
                  static check confirming this stays gated in production
                  packaging. -->
-            <div id="auto-diag-panel" hidden style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
+            <!-- FINAL UI REORGANIZATION mission — was a plain <div>,
+                 converted to <details> (see #detail-pick-diag-panel's
+                 identical comment) so this joins the same "▸ Geliştirici
+                 Araçları" convention every other dev panel now uses;
+                 revealAutoDiagPanelIfDev() needed zero changes. -->
+            <details id="auto-diag-panel" class="ws-advanced" hidden>
+              <summary data-i18n="devtools.title">Developer Tools</summary>
               <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
               <button type="button" id="auto-diag-copy-btn" class="ws-chip-btn">📋 Copy AUTO Diagnostic</button>
               <p id="auto-diag-status" class="ws-note" style="margin-top:4px;"></p>
               <textarea id="auto-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
-            </div>
+            </details>
           </div>
         </section>
 
@@ -442,6 +481,14 @@
             </select>
           </div>
 
+          <!-- FINAL UI POLISH PASS: relocated here from just under Auto
+               Detect/Structured Data/Templates above, right next to its
+               exact mutually-exclusive counterpart #start-run-btn — see
+               the long comment where it used to sit for the full "kept,
+               not removed, because it's a genuinely different action from
+               BAŞLA" analysis. Same id, same handler (handlePreview),
+               only DOM position + label text changed. -->
+          <button id="preview-btn" class="ws-btn ws-btn-primary ws-btn-block" data-i18n="scrape.preview">Preview</button>
           <button id="start-run-btn" class="ws-btn ws-btn-primary ws-btn-block" hidden data-i18n="runMode.start">Start</button>
         </section>
         </details>
@@ -477,148 +524,101 @@
               <span data-i18n="results.title">Results</span> <span id="row-count" class="ws-row-count"></span>
             </div>
           </div>
-          <p id="results-status-text" class="ws-note ws-workflow-status"></p>
+          <!-- FINAL UI REORGANIZATION mission — TOP SUMMARY CARD: every
+               element below is completely unchanged (same ids, same
+               popup.js render functions — renderLiveSessionUI()/
+               renderDiscoveryUI() — same mutually-exclusive show/hide
+               conditions that already ensure only the lines relevant to
+               the CURRENT session state are ever visible at once, so
+               nothing here is visually duplicated). Only the outer
+               .ws-summary-card wrapper is new, grouping what used to be
+               a set of loose, scattered <p> lines into one visually
+               unified card. -->
+          <div class="ws-summary-card">
+            <p id="results-status-text" class="ws-note ws-workflow-status"></p>
 
-          <!-- ============ V1 SIMPLIFIED SESSION WORKFLOW ============
-               Shown only while/after a BAŞLA-started live-collect
-               session exists for this page (see popup.js's
-               renderLiveSessionUI) — a Preview/advanced-flow result
-               never shows this at all, and keeps working exactly as
-               before with the "Next Actions"/export UI always visible. -->
-          <p id="live-session-status" class="ws-note ws-workflow-status" hidden></p>
-          <!-- NEW FEATURE — AUTOMATIC PAGINATION: a second status line,
-               shown only while an Auto-Next-enabled session's navigation
-               loop is actively running/navigating (never shown for a
-               session without autoPaginate at all — see popup.js's
-               renderLiveSessionUI). "DURDUR" stops future automatic
-               navigation only — it does NOT freeze the dataset or hide
-               the export gate the way BİTİR does; the session stays
-               'active' and BİTİR still works normally afterward. -->
-          <p id="auto-paginate-status" class="ws-note ws-workflow-status" hidden></p>
-          <!-- NEW FEATURE — INFINITE SCROLL (Auto Scroll): its own status
-               line, same reachability contract as auto-paginate-status
-               above (only shown for a session that actually has
-               autoScroll active). Reuses the SAME DURDUR button as Auto
-               Next — one unified Stop control (spec: "Do not clutter the
-               popup"; "If Auto Next already exists..."), which now stops
-               whichever of the two (or both) is currently running. -->
-          <p id="auto-scroll-status" class="ws-note ws-workflow-status" hidden></p>
+            <!-- ============ V1 SIMPLIFIED SESSION WORKFLOW ============
+                 Shown only while/after a BAŞLA-started live-collect
+                 session exists for this page (see popup.js's
+                 renderLiveSessionUI) — a Preview/advanced-flow result
+                 never shows this at all, and keeps working exactly as
+                 before with the "Next Actions"/export UI always visible. -->
+            <p id="live-session-status" class="ws-note ws-workflow-status" hidden></p>
+            <!-- NEW FEATURE — AUTOMATIC PAGINATION: a second status line,
+                 shown only while an Auto-Next-enabled session's navigation
+                 loop is actively running/navigating (never shown for a
+                 session without autoPaginate at all — see popup.js's
+                 renderLiveSessionUI). "DURDUR" stops future automatic
+                 navigation only — it does NOT freeze the dataset or hide
+                 the export gate the way BİTİR does; the session stays
+                 'active' and BİTİR still works normally afterward. -->
+            <p id="auto-paginate-status" class="ws-note ws-workflow-status" hidden></p>
+            <!-- NEW FEATURE — INFINITE SCROLL (Auto Scroll): its own status
+                 line, same reachability contract as auto-paginate-status
+                 above (only shown for a session that actually has
+                 autoScroll active). Reuses the SAME DURDUR button as Auto
+                 Next — one unified Stop control (spec: "Do not clutter the
+                 popup"; "If Auto Next already exists..."), which now stops
+                 whichever of the two (or both) is currently running. -->
+            <p id="auto-scroll-status" class="ws-note ws-workflow-status" hidden></p>
 
-          <!-- ============ AUTOMATIC DISCOVERY STATUS + PROCESSING CHOICE ============
-               Data-integrity/UX mission: the ONLY thing a normal user sees
-               about traversal is "how many unique records have been found
-               so far" and "how many pages scanned" — never Next/Scroll/
-               Load More terminology (mission's own explicit requirement).
-               Populated/shown entirely by popup.js's renderDiscoveryUI(),
-               driven by activeLiveSession.discovery (see content/
-               discovery.js) — a session created by any BAŞLA click always
-               has this field now, so this panel is the normal, default
-               experience, not an opt-in extra. -->
-          <div id="discovery-panel" hidden>
-            <p id="discovery-status-line1" class="ws-note ws-workflow-status"></p>
-            <p id="discovery-status-line2" class="ws-note ws-workflow-status"></p>
-            <p id="discovery-status-line3" class="ws-note ws-workflow-status"></p>
+            <!-- ============ AUTOMATIC DISCOVERY STATUS + PROCESSING CHOICE ============
+                 Data-integrity/UX mission: the ONLY thing a normal user sees
+                 about traversal is "how many unique records have been found
+                 so far" and "how many pages scanned" — never Next/Scroll/
+                 Load More terminology (mission's own explicit requirement).
+                 Populated/shown entirely by popup.js's renderDiscoveryUI(),
+                 driven by activeLiveSession.discovery (see content/
+                 discovery.js) — a session created by any BAŞLA click always
+                 has this field now, so this panel is the normal, default
+                 experience, not an opt-in extra. -->
+            <div id="discovery-panel" hidden>
+              <p id="discovery-status-line1" class="ws-note ws-workflow-status"></p>
+              <p id="discovery-status-line2" class="ws-note ws-workflow-status"></p>
 
-            <!-- Shown once discovery has stopped/completed and no
-                 processing selection has been made yet (mission section
-                 8: "How many should be processed? [ALL] [FIRST ___]"). -->
-            <div id="discovery-choice-panel" hidden>
-              <p id="discovery-choice-heading" class="ws-note" style="font-weight:600;"></p>
-              <div class="ws-actions-row">
-                <button type="button" id="discovery-process-all-btn" class="ws-btn ws-btn-primary"></button>
+              <!-- Shown once discovery has stopped/completed and no
+                   processing selection has been made yet (mission section
+                   8: "How many should be processed? [ALL] [FIRST ___]"). -->
+              <div id="discovery-choice-panel" hidden>
+                <p id="discovery-choice-heading" class="ws-note" style="font-weight:600;"></p>
+                <div class="ws-actions-row">
+                  <button type="button" id="discovery-process-all-btn" class="ws-btn ws-btn-primary"></button>
+                </div>
+                <div class="ws-checkbox-row" style="margin-top:6px;">
+                  <label for="discovery-first-n-input" data-i18n="discovery.firstLabel">FIRST</label>
+                  <input type="number" id="discovery-first-n-input" min="1" step="1" style="width:100px;" />
+                  <button type="button" id="discovery-process-first-btn" class="ws-btn ws-btn-secondary" data-i18n="discovery.processFirstBtn">Process</button>
+                </div>
+                <p id="discovery-choice-error" class="ws-note" style="color:#b91c1c;" hidden></p>
               </div>
-              <div class="ws-checkbox-row" style="margin-top:6px;">
-                <label for="discovery-first-n-input" data-i18n="discovery.firstLabel">FIRST</label>
-                <input type="number" id="discovery-first-n-input" min="1" step="1" style="width:100px;" />
-                <button type="button" id="discovery-process-first-btn" class="ws-btn ws-btn-secondary" data-i18n="discovery.processFirstBtn">Process</button>
-              </div>
-              <p id="discovery-choice-error" class="ws-note" style="color:#b91c1c;" hidden></p>
-            </div>
 
-            <!-- Shown once a processing selection has actually been made
-                 (mission section 9's own final-count list). -->
-            <div id="discovery-summary-panel" hidden>
-              <p id="discovery-summary-found" class="ws-note"></p>
-              <p id="discovery-summary-processed" class="ws-note"></p>
-              <p id="discovery-summary-duplicates" class="ws-note"></p>
-              <p id="discovery-summary-invalid" class="ws-note"></p>
+              <!-- Shown once a processing selection has actually been made
+                   (mission section 9's own final-count list). FINAL UI
+                   POLISH PASS: #discovery-summary-found defaults `hidden`
+                   here — it always repeats the exact same key/count
+                   discovery-status-line1 above already shows (renderDiscoveryUI
+                   keeps it hidden on every render for the same reason);
+                   left in the DOM/untranslated-by-JS as before, only its
+                   default visibility changed. -->
+              <div id="discovery-summary-panel" hidden>
+                <p id="discovery-summary-found" class="ws-note" hidden></p>
+                <p id="discovery-summary-processed" class="ws-note"></p>
+                <p id="discovery-summary-duplicates" class="ws-note"></p>
+                <p id="discovery-summary-invalid" class="ws-note"></p>
+              </div>
+
+              <!-- FINAL UI POLISH PASS: relocated here (was directly after
+                   line2, before the choice/summary panels) so the compact
+                   card's one persistent "Durum: ..." status line reads as
+                   the LAST line of the summary, after the duplicates/
+                   invalid counts — matching the mission's own target
+                   ordering. Same id, same renderDiscoveryUI() logic. -->
+              <p id="discovery-status-line3" class="ws-note ws-workflow-status"></p>
             </div>
           </div>
 
           <button id="durdur-btn" class="ws-btn ws-btn-secondary ws-btn-block" hidden data-i18n="liveSession.durdur">DURDUR</button>
           <button id="bitir-btn" class="ws-btn ws-btn-primary ws-btn-block" hidden data-i18n="liveSession.bitir">BİTİR</button>
-
-          <!-- V1 SIMPLIFIED SESSION WORKFLOW DIAGNOSTICS (DEV ONLY) — same
-               reachability contract as #auto-diag-panel above: `hidden` by
-               default in the shipped HTML, only ever unhidden by popup.js
-               after a real WSLicense.isDevelopmentInstall() check resolves
-               true, which can never be true for a packaged/Chrome-Web-
-               Store install. Never translated (data-i18n) — not
-               user-facing production copy. See scripts/release-check.js
-               for the static check confirming this stays gated. -->
-          <div id="session-diag-panel" hidden style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
-            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
-            <button type="button" id="session-diag-copy-btn" class="ws-chip-btn">📋 Copy Session Diagnostic</button>
-            <p id="session-diag-status" class="ws-note" style="margin-top:4px;"></p>
-            <textarea id="session-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
-          </div>
-
-          <!-- [WS-PAGE-DIAG] TEMPORARY PAGINATION DIAGNOSTIC (DEV ONLY) —
-               real production report: main discovery stuck on page 11,
-               the page's own DevTools console is destroyed on every real
-               pagination navigation. Reads content/discovery.js's own
-               persistent ring buffer (chrome.storage.local key
-               ws_pagination_diag, capped at 100 compact entries) directly
-               — survives navigation, no DevTools timing required. Same
-               reachability contract as #session-diag-panel above:
-               `hidden` by default in the shipped HTML, only ever unhidden
-               by popup.js after a real WSLicense.isDevelopmentInstall()
-               check resolves true, which can never be true for a
-               packaged/Chrome-Web-Store install. Never translated
-               (data-i18n) — not user-facing production copy. See
-               scripts/release-check.js for the static check confirming
-               this stays gated. -->
-          <div id="pagination-diag-panel" hidden style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
-            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
-            <button type="button" id="pagination-diag-copy-btn" class="ws-chip-btn">📋 Copy Pagination Diagnostic</button>
-            <p id="pagination-diag-status" class="ws-note" style="margin-top:4px;"></p>
-            <textarea id="pagination-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
-          </div>
-
-          <!-- SELF-DIAGNOSTICS / HEALTH CHECK (DEV ONLY) — observes and
-               summarizes the FULL lifecycle of a main scrape (start flow,
-               discovery/pagination, UI<->engine consistency, storage,
-               Detail Enrichment) as one HEALTHY/WARNING/STALLED/FAILED
-               verdict with an exact reason — diagnoses only, never
-               mutates/resets/restarts anything. Same reachability
-               contract as every other dev-only panel above: `hidden` by
-               default in the shipped HTML, only ever unhidden by
-               popup.js after a real WSLicense.isDevelopmentInstall()
-               check resolves true, which can never be true for a
-               packaged/Chrome-Web-Store install. Never translated
-               (data-i18n) — not user-facing production copy. See
-               scripts/release-check.js for the static check confirming
-               this stays gated. -->
-          <div id="health-check-panel" hidden style="margin-top:10px;border-top:1px solid #e5e7eb;padding-top:8px;">
-            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
-            <div class="ws-section-title" style="font-size:12px;">🩺 Sağlık Kontrolü</div>
-            <div class="ws-toolbar-row">
-              <button type="button" id="health-check-run-btn" class="ws-chip-btn">🩺 Sağlık Kontrolü</button>
-              <button type="button" id="health-check-copy-report-btn" class="ws-chip-btn">📋 Raporu Kopyala</button>
-              <button type="button" id="health-check-copy-history-btn" class="ws-chip-btn">📋 Tanılama Geçmişini Kopyala</button>
-              <button type="button" id="health-check-clear-btn" class="ws-chip-btn">🧹 Tanılamayı Temizle</button>
-            </div>
-            <p class="ws-note" style="margin-top:6px;"><strong>Overall:</strong> <span id="health-check-overall">—</span></p>
-            <p class="ws-note"><strong>Main scrape:</strong> <span id="health-check-main">—</span></p>
-            <p class="ws-note"><strong>Pagination:</strong> <span id="health-check-pagination">—</span></p>
-            <p class="ws-note"><strong>UI sync:</strong> <span id="health-check-ui-sync">—</span></p>
-            <p class="ws-note"><strong>Storage:</strong> <span id="health-check-storage">—</span></p>
-            <p class="ws-note"><strong>Detail:</strong> <span id="health-check-detail">—</span></p>
-            <p class="ws-note"><strong>Last progress:</strong> <span id="health-check-last-progress">—</span> · <strong>Page:</strong> <span id="health-check-current-page">—</span> · <strong>Results:</strong> <span id="health-check-result-count">—</span></p>
-            <p class="ws-note"><strong>Last issue:</strong> <span id="health-check-last-issue">—</span></p>
-            <p id="health-check-status" class="ws-note" style="margin-top:4px;"></p>
-            <textarea id="health-check-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:140px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
-          </div>
 
           <!-- Everything below (Next Actions, Export, Assets, Change
                Tracking, Deep Scraping) is the "final download/export
@@ -628,22 +628,26 @@
                (no session at all, or a 'finished' one) — always visible,
                exactly as before this feature existed. -->
           <div id="export-gate">
-          <!-- ============ V1 WORKFLOW REORG — "Next Actions" ============
-               Step 3 of the core workflow (Collect -> Review -> Next
-               Action). Reuses the EXISTING switchTab('monitor')/
-               switchTab('research') navigation and the EXISTING Export
-               Options panel — no duplicated Monitor/Research/Export
-               logic, just a clearer, more prominent entry point plus
-               (for Monitor) passing along which saved scraper the
-               current results came from whenever one exists. -->
-          <div id="results-next-actions" class="ws-next-actions">
-            <div class="ws-next-actions-title" data-i18n="results.nextActionsTitle">What would you like to do next?</div>
-            <div class="ws-toolbar-row">
-              <button id="results-export-data-btn" class="ws-btn ws-btn-secondary" data-i18n="results.exportData">Export Data</button>
-              <button id="results-go-monitor-btn" class="ws-btn ws-btn-secondary" data-i18n="results.monitorChanges">Monitor Changes</button>
-              <button id="results-go-research-btn" class="ws-btn ws-btn-secondary" data-i18n="results.createResearchPackage">Create Research Package</button>
-            </div>
-          </div>
+          <!-- FINAL UI REORGANIZATION mission — real production request:
+               "Remove visual duplication from the current large 'Şimdi ne
+               yapmak istersiniz?' card... Move their actual actions into
+               the appropriate sections above." The old #results-next-
+               actions card (a title + 3 buttons) is removed as a VISUAL
+               block; none of its 3 actions were deleted:
+                 - "Export Data" (results-export-data-btn) called the
+                   exact same toggleExportOptionsPanel() the "⚙ Export
+                   Options" chip in the Export group below ALREADY calls
+                   — a genuine, pre-existing 100% duplicate with no
+                   behavior of its own, so only this one redundant DOM
+                   element (never the underlying feature, which stays
+                   fully reachable) was removed.
+                 - "Monitor Changes" (results-go-monitor-btn) moved down
+                   to a small chip near the Data group below — same
+                   handler (handleResultsGoMonitor), untouched.
+                 - "Create Research Package" (results-go-research-btn)
+                   moved into the new ▸ Araştırma Paketi group further
+                   down — same handler (handleResultsGoResearch),
+                   untouched. -->
 
           <div class="ws-toolbar-group-label" data-i18n="results.dataGroupLabel">Data</div>
           <div class="ws-toolbar-row">
@@ -651,6 +655,7 @@
             <button id="toggle-filter-btn" class="ws-chip-btn" data-i18n="results.filter">Filter</button>
             <button id="toggle-sort-btn" class="ws-chip-btn" data-i18n="results.sort">Sort</button>
             <button id="toggle-dedupe-btn" class="ws-chip-btn" data-i18n="results.removeDuplicates">Remove Duplicates</button>
+            <button id="results-go-monitor-btn" class="ws-chip-btn" data-i18n="results.monitorChanges">Monitor Changes</button>
             <button id="reset-results-btn" class="ws-chip-btn ws-chip-btn-warn" hidden data-i18n="results.resetResults">Reset Results</button>
           </div>
 
@@ -1033,12 +1038,12 @@
             <table id="preview-table"></table>
           </div>
           <p id="preview-note" class="ws-note"></p>
-          <p id="anomaly-legend" class="ws-note" hidden>⚠ = possible mismatch — hover a row for details. Flagged rows are not removed from the export.</p>
+          <p id="anomaly-legend" class="ws-note" hidden data-i18n="preview.anomalyLegend">⚠ = possible mismatch — hover a row for details. Flagged rows are not removed from the export.</p>
 
           <div class="ws-toolbar-group-label" data-i18n="export.groupLabel">Export</div>
           <div class="ws-export-row">
-            <button id="export-csv-btn" class="ws-btn ws-btn-secondary" data-i18n="export.csv">CSV</button>
             <button id="export-xlsx-btn" class="ws-btn ws-btn-secondary" data-i18n="export.excel">Excel</button>
+            <button id="export-csv-btn" class="ws-btn ws-btn-secondary" data-i18n="export.csv">CSV</button>
             <button id="export-json-btn" class="ws-btn ws-btn-secondary" data-i18n="export.json">JSON</button>
             <div class="ws-copy-split">
               <button id="copy-btn" class="ws-btn ws-btn-secondary" data-i18n="export.copy">Copy</button>
@@ -1146,134 +1151,67 @@
             </div>
           </section>
 
-          <div class="ws-toolbar-group-label" data-i18n="changeTracking.groupLabel">Change Tracking</div>
-          <div class="ws-toolbar-row">
-            <button id="toggle-snapshots-btn" class="ws-chip-btn" data-i18n="changeTracking.snapshots">📸 Snapshots</button>
-          </div>
-
-          <div id="snapshots-panel" class="ws-panel-inline" hidden>
-            <details class="ws-advanced">
-              <summary>Advanced (compare key)</summary>
-              <label>Compare rows by</label>
-              <select id="compare-key-select"></select>
-            </details>
-            <p id="snapshot-duplicate-note" class="ws-note" hidden></p>
-            <p id="snapshot-info-text" class="ws-note" style="margin-top:8px;"></p>
-            <div class="ws-panel-actions">
-              <button id="save-snapshot-btn" class="ws-btn ws-btn-secondary" data-i18n="snapshots.saveCurrent">💾 Save Current Snapshot</button>
-              <button id="compare-snapshot-btn" class="ws-btn ws-btn-primary" hidden data-i18n="snapshots.compare">⇄ Compare with Previous</button>
+          <!-- FINAL UI REORGANIZATION mission — ▸ Değişiklik Takibi:
+               #toggle-snapshots-btn/#snapshots-panel and their handlers
+               are completely unchanged (still the exact same hidden-
+               attribute toggle they always were); only wrapped in a
+               collapsed-by-default <details> group. -->
+          <details class="ws-section ws-advanced ws-section-top">
+            <summary data-i18n="changeTracking.groupLabel">Change Tracking</summary>
+            <div class="ws-toolbar-row">
+              <button id="toggle-snapshots-btn" class="ws-chip-btn" data-i18n="changeTracking.snapshots">📸 Snapshots</button>
             </div>
-          </div>
 
-          <!-- ================= V1.18 DEEP SCRAPING ================= -->
-          <!-- Progressive disclosure (spec #1/#16): collapsed by default,
-               only appears once there are real results with a Link
-               column to follow. Normal scraping (CONFIGURE -> RUN ->
-               RESULTS) is completely unaffected either way. -->
-          <div class="ws-toolbar-group-label" data-i18n="deepScrape.groupLabel">Deep Scraping</div>
-          <div class="ws-toolbar-row">
-            <button id="toggle-deepscrape-btn" class="ws-chip-btn" data-i18n="deepScrape.toggle">🔗 Deep Scraping</button>
-          </div>
-
-          <div id="deepscrape-panel" class="ws-panel-inline" hidden>
-            <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;color:#111827;">
-              <input type="checkbox" id="ds-enabled" />
-              <span data-i18n="deepScrape.enableLabel">Enable Deep Scraping — visit each row's link and collect additional fields</span>
-            </label>
-
-            <div id="ds-config-body" hidden>
-              <label>Follow links from</label>
-              <select id="ds-source-column"></select>
-
-              <div class="ws-section-title" style="font-size:12px;margin-top:10px;" data-i18n="deepScrape.detailFieldsTitle">Detail Page Fields</div>
-              <ul id="ds-fields-list" class="ws-columns"></ul>
-              <p id="ds-fields-empty" class="ws-empty" data-i18n="deepScrape.fieldsEmpty">No detail fields yet — add one manually or pick fields visually on a sample page.</p>
-              <div class="ws-toolbar-row">
-                <button id="ds-add-field-btn" class="ws-chip-btn" data-i18n="deepScrape.addField">+ Add Detail Field</button>
-                <button id="ds-pick-fields-btn" class="ws-chip-btn" data-i18n="deepScrape.pickFields">🎯 Pick Fields on Sample Page</button>
-              </div>
-
-              <div id="ds-add-field-form" class="ws-panel-inline" hidden>
-                <label>Field Name</label>
-                <input type="text" id="ds-field-name" spellcheck="false" />
-                <label>Selector</label>
-                <input type="text" id="ds-field-selector" spellcheck="false" placeholder=".description" />
-                <label>Extraction Type</label>
-                <select id="ds-field-attribute">
-                  <option value="text">Text</option>
-                  <option value="html">HTML</option>
-                  <option value="href">Link URL</option>
-                  <option value="src">Image source</option>
-                  <option value="alt">Alt text</option>
-                  <option value="attr">Attribute…</option>
-                </select>
-                <div id="ds-field-attrname-row" hidden>
-                  <label>Attribute name</label>
-                  <input type="text" id="ds-field-attrname" spellcheck="false" placeholder="data-sku" />
-                </div>
-                <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-weight:400;color:#111827;margin-top:8px;">
-                  <input type="checkbox" id="ds-field-multiple" />
-                  This may match multiple values — extract all
-                </label>
-                <div class="ws-panel-actions">
-                  <button id="ds-field-save-btn" class="ws-btn ws-btn-primary">Save Field</button>
-                  <button id="ds-field-cancel-btn" class="ws-btn ws-btn-secondary">Cancel</button>
-                </div>
-              </div>
-
+            <div id="snapshots-panel" class="ws-panel-inline" hidden>
               <details class="ws-advanced">
-                <summary>Advanced (concurrency &amp; pacing)</summary>
-                <label>Concurrency</label>
-                <select id="ds-concurrency">
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4" selected>4</option>
-                  <option value="5">5</option>
-                </select>
-                <label>Request delay</label>
-                <select id="ds-delay-mode">
-                  <option value="auto" selected>Auto / Safe Default</option>
-                  <option value="custom">Custom</option>
-                </select>
-                <div id="ds-custom-delay-row" hidden>
-                  <label>Custom delay (ms)</label>
-                  <input type="number" id="ds-custom-delay" min="0" step="100" value="400" />
-                </div>
-                <label>Retry limit</label>
-                <select id="ds-retry-limit">
-                  <option value="1">1 (no retries)</option>
-                  <option value="2">2</option>
-                  <option value="3" selected>3 (default)</option>
-                  <option value="4">4</option>
-                  <option value="5">5</option>
-                </select>
+                <summary>Advanced (compare key)</summary>
+                <label>Compare rows by</label>
+                <select id="compare-key-select"></select>
               </details>
-
-              <p id="ds-workload-summary" class="ws-note" style="margin-top:8px;"></p>
-
+              <p id="snapshot-duplicate-note" class="ws-note" hidden></p>
+              <p id="snapshot-info-text" class="ws-note" style="margin-top:8px;"></p>
               <div class="ws-panel-actions">
-                <button id="ds-test-btn" class="ws-btn ws-btn-secondary" data-i18n="deepScrape.test">Test Detail Fields (sample)</button>
-                <button id="ds-start-btn" class="ws-btn ws-btn-primary" data-i18n="deepScrape.start">Start Deep Scrape</button>
+                <button id="save-snapshot-btn" class="ws-btn ws-btn-secondary" data-i18n="snapshots.saveCurrent">💾 Save Current Snapshot</button>
+                <button id="compare-snapshot-btn" class="ws-btn ws-btn-primary" hidden data-i18n="snapshots.compare">⇄ Compare with Previous</button>
               </div>
+            </div>
+          </details>
 
-              <div id="ds-test-results" class="ws-note" hidden style="white-space:pre-line;margin-top:8px;"></div>
+          <!-- FINAL UI REORGANIZATION mission — ▸ Araştırma Paketi: the
+               "Create Research Package" action moved here from the
+               removed #results-next-actions card — same id, same
+               handleResultsGoResearch handler, same switchTab('research')
+               navigation, completely unchanged. -->
+          <details class="ws-section ws-advanced ws-section-top">
+            <summary data-i18n="results.researchPackageGroupLabel">Research Package</summary>
+            <div class="ws-toolbar-row">
+              <button id="results-go-research-btn" class="ws-btn ws-btn-secondary ws-btn-block" data-i18n="results.createResearchPackage">Create Research Package</button>
             </div>
-          </div>
+          </details>
 
-          <section id="ds-progress-section" class="ws-section" hidden>
-            <div class="ws-section-title">
-              <span data-i18n="deepScrape.progressTitle">Deep Scraping</span> <span id="ds-progress-badge" class="ws-status-badge">RUNNING</span>
-            </div>
-            <p id="ds-progress-text" class="ws-note" style="margin-bottom:4px;"></p>
-            <p id="ds-progress-current" class="ws-note" style="font-size:11px;color:#6b7280;"></p>
-            <p id="ds-retry-status" class="ws-note" hidden style="font-size:11px;color:#b45309;"></p>
-            <div class="ws-actions-row">
-              <button id="ds-stop-btn" class="ws-btn ws-btn-danger" data-i18n="deepScrape.stop">Stop</button>
-              <button id="ds-retry-failed-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="deepScrape.retryFailed">Retry Failed</button>
-            </div>
-            <p id="ds-summary-text" class="ws-note" hidden style="white-space:pre-line;margin-top:8px;"></p>
-          </section>
+          <!-- RESULTS-TAB DEEP SCRAPE UI REMOVAL (dedup with the Detay
+               tab, real production request): the "▸ Derin Veri Çekme" /
+               "Deep Scraping" collapsed group that used to live here
+               (#toggle-deepscrape-btn / #deepscrape-panel / #ds-
+               progress-section and every #ds-* control inside — Enable
+               checkbox, Follow-links-from column picker, Detail Page
+               Fields list, concurrency/pacing settings, Test/Start
+               buttons, progress + summary display) has been REMOVED as a
+               UI entry point ONLY. The top-level "Detay" tab is the one
+               remaining, fully-functional surface for this exact
+               workflow (same shared background.js Deep Scrape engine —
+               START_DEEP_SCRAPE/STOP_DEEP_SCRAPE/TEST_DEEP_SCRAPE_SAMPLE/
+               RESUME_DEEP_SCRAPE/RETRY_FAILED_DEEP_SCRAPE_ITEMS/
+               GET_DEEP_SCRAPE_STATE, same ws_deepscrape_run/
+               ws_deepscrape_fields storage keys). Every popup.js function
+               this panel used to drive (renderDeepScrapePanel/
+               renderDeepScrapeProgress/renderDeepScrapeSummary/
+               mergeDeepScrapeResults/handleDeepScrapeStart/etc.) is still
+               fully intact and unremoved — see their own updated
+               comments for how each now degrades safely (no-ops on the
+               now-absent DOM, while state/merge/resume/trial-credit
+               logic for any already-in-flight legacy run keeps working
+               exactly as before) instead of being deleted outright. -->
           </div><!-- /#export-gate -->
         </section>
 
@@ -1313,6 +1251,69 @@
             <button id="save-after-compare-btn" class="ws-btn ws-btn-secondary ws-btn-block" style="margin-top:8px;margin-bottom:0;" data-i18n="changes.saveNow">Save Now</button>
           </div>
         </section>
+
+        <!-- FINAL UI REORGANIZATION mission — ALL Results-tab dev-only
+             diagnostics consolidated under ONE ▸ Geliştirici Araçları,
+             moved to the very end of the tab (never below important
+             controls — mission section 7) so BAŞLA/DURDUR/BİTİR/Export
+             are never pushed down by diagnostic content. Every inner
+             panel (#session-diag-panel/#pagination-diag-panel/
+             #health-check-panel) is completely unchanged internally —
+             same ids, same controls, same isDevelopmentInstall()-gated
+             reveal contract each already had; only their DOM location
+             and outer wrapping changed. The OUTER <details> itself is
+             ALSO hidden by default and only unhidden by popup.js's own
+             revealResultsDevToolsPanelIfDev() (same isDevelopmentInstall()
+             gate, called alongside the 3 existing reveal functions) —
+             without this, the "▸ Geliştirici Araçları" label itself
+             would leak into a production/store build even though its
+             contents stayed correctly hidden. See scripts/release-check.js
+             for the static check confirming this whole group stays gated. -->
+        <details id="results-devtools-panel" class="ws-section ws-advanced ws-section-top ws-devtools-panel" hidden>
+          <summary data-i18n="devtools.title">Developer Tools</summary>
+
+          <!-- V1 SIMPLIFIED SESSION WORKFLOW DIAGNOSTICS (DEV ONLY) -->
+          <div id="session-diag-panel" class="ws-devtools-item" hidden>
+            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+            <button type="button" id="session-diag-copy-btn" class="ws-chip-btn">📋 Copy Session Diagnostic</button>
+            <p id="session-diag-status" class="ws-note" style="margin-top:4px;"></p>
+            <textarea id="session-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+          </div>
+
+          <!-- [WS-PAGE-DIAG] TEMPORARY PAGINATION DIAGNOSTIC (DEV ONLY) —
+               reads content/discovery.js's own persistent ring buffer
+               (chrome.storage.local key ws_pagination_diag) directly. -->
+          <div id="pagination-diag-panel" class="ws-devtools-item" hidden>
+            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+            <button type="button" id="pagination-diag-copy-btn" class="ws-chip-btn">📋 Copy Pagination Diagnostic</button>
+            <p id="pagination-diag-status" class="ws-note" style="margin-top:4px;"></p>
+            <textarea id="pagination-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:120px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+          </div>
+
+          <!-- SELF-DIAGNOSTICS / HEALTH CHECK (DEV ONLY) — observes and
+               summarizes the FULL lifecycle of a main scrape, diagnoses
+               only, never mutates/resets/restarts anything. -->
+          <div id="health-check-panel" class="ws-devtools-item" hidden>
+            <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
+            <div class="ws-section-title" style="font-size:12px;" data-i18n="healthCheck.title">🩺 Health Check</div>
+            <div class="ws-toolbar-row">
+              <button type="button" id="health-check-run-btn" class="ws-chip-btn" data-i18n="healthCheck.title">🩺 Health Check</button>
+              <button type="button" id="health-check-copy-report-btn" class="ws-chip-btn" data-i18n="healthCheck.copyReport">📋 Copy Report</button>
+              <button type="button" id="health-check-copy-history-btn" class="ws-chip-btn" data-i18n="healthCheck.copyHistory">📋 Copy Diagnostic History</button>
+              <button type="button" id="health-check-clear-btn" class="ws-chip-btn" data-i18n="healthCheck.clear">🧹 Clear Diagnostics</button>
+            </div>
+            <p class="ws-note" style="margin-top:6px;"><strong data-i18n="healthCheck.overall">Overall:</strong> <span id="health-check-overall">—</span></p>
+            <p class="ws-note"><strong data-i18n="healthCheck.mainScrape">Main scrape:</strong> <span id="health-check-main">—</span></p>
+            <p class="ws-note"><strong data-i18n="healthCheck.pagination">Pagination:</strong> <span id="health-check-pagination">—</span></p>
+            <p class="ws-note"><strong data-i18n="healthCheck.uiSync">UI sync:</strong> <span id="health-check-ui-sync">—</span></p>
+            <p class="ws-note"><strong data-i18n="healthCheck.storage">Storage:</strong> <span id="health-check-storage">—</span></p>
+            <p class="ws-note"><strong data-i18n="healthCheck.detail">Detail:</strong> <span id="health-check-detail">—</span></p>
+            <p class="ws-note"><strong data-i18n="healthCheck.lastProgress">Last progress:</strong> <span id="health-check-last-progress">—</span> · <strong data-i18n="healthCheck.page">Page:</strong> <span id="health-check-current-page">—</span> · <strong data-i18n="healthCheck.results">Results:</strong> <span id="health-check-result-count">—</span></p>
+            <p class="ws-note"><strong data-i18n="healthCheck.lastIssue">Last issue:</strong> <span id="health-check-last-issue">—</span></p>
+            <p id="health-check-status" class="ws-note" style="margin-top:4px;"></p>
+            <textarea id="health-check-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:140px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
+          </div>
+        </details>
       </div>
 
       <!-- ================= DETAY (DETAIL ENRICHMENT) TAB =================
@@ -1359,12 +1360,22 @@
                  each real step of the picker-activation sequence
                  (background.js#startDetailFieldPick) regardless of
                  whether the popup that triggered it is still open. -->
-            <div id="detail-pick-diag-panel" hidden style="margin-top:6px;border-top:1px solid #e5e7eb;padding-top:6px;">
+            <!-- FINAL UI REORGANIZATION mission — was a plain <div>,
+                 converted to <details> for the same reason every other
+                 dev panel in this file was: `hidden` (still toggled by
+                 the exact same, unmodified revealDetailPickDiagPanelIfDev())
+                 is completely independent of a <details> element's own
+                 `open` attribute, so this reveal function needed zero
+                 changes — it now simply reveals a collapsed "▸
+                 Geliştirici Araçları" group instead of an already-
+                 expanded block. -->
+            <details id="detail-pick-diag-panel" class="ws-advanced" hidden>
+              <summary data-i18n="devtools.title">Developer Tools</summary>
               <p class="ws-note" style="font-size:11px;"><em>Development mode detected (unpacked install) — this diagnostic tool is never available in a Chrome Web Store install.</em></p>
               <button type="button" id="detail-pick-diag-copy-btn" class="ws-chip-btn">📋 Copy Detail Picker Diagnostic</button>
               <p id="detail-pick-diag-status" class="ws-note" style="margin-top:4px;"></p>
               <textarea id="detail-pick-diag-textarea" readonly hidden style="width:100%;box-sizing:border-box;height:110px;font-family:monospace;font-size:10.5px;margin-top:4px;"></textarea>
-            </div>
+            </details>
 
             <div id="dt-add-field-form" class="ws-panel-inline" hidden>
               <label data-i18n="detail.fieldNameLabel">Field Name</label>
@@ -1451,13 +1462,32 @@
             <div class="ws-section-title">
               <span data-i18n="detail.progressTitle">Detail Enrichment</span> <span id="dt-progress-badge" class="ws-status-badge">RUNNING</span>
             </div>
-            <p id="dt-progress-text" class="ws-note" style="margin-bottom:4px;"></p>
+            <!-- FINAL MICRO UI POLISH (item 3): compact max-two-line
+                 presentation — same single element/id, same render
+                 function, only its own textContent now joins two
+                 shorter WSI18n.t() lines with '\n' instead of one long
+                 concatenated sentence (see renderDetailProgress() in
+                 popup.js). white-space:pre-line is what makes that '\n'
+                 actually render as a line break. -->
+            <p id="dt-progress-text" class="ws-note" style="margin-bottom:4px;white-space:pre-line;"></p>
             <p id="dt-progress-current" class="ws-note" style="font-size:11px;color:#6b7280;"></p>
             <p id="dt-retry-status" class="ws-note" hidden style="font-size:11px;color:#b45309;"></p>
             <div class="ws-actions-row">
               <button id="dt-stop-btn" class="ws-btn ws-btn-danger" data-i18n="deepScrape.stop">Stop</button>
               <button id="dt-resume-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="detail.resume">Resume</button>
               <button id="dt-retry-failed-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="deepScrape.retryFailed">Retry Failed</button>
+              <!-- FINAL UI REORGANIZATION mission — new primary action for
+                   the completed state: switches to the Results tab ONLY
+                   (switchTab('results'), the exact same existing
+                   navigation every other "go to Results" control in this
+                   file already uses) — no fetch/merge/reset/process of
+                   any kind. Detail data is already hydrated into rawRows
+                   by the time this run reaches a terminal state (see
+                   hydrateDetailResultsIfAny()/mergeDetailResults()), so
+                   there is nothing left for this button to do beyond
+                   navigating there. Same terminal-only visibility as
+                   #dt-new-run-btn. -->
+              <button id="dt-view-results-btn" class="ws-btn ws-btn-primary" hidden data-i18n="detail.viewResults">View Results</button>
               <button id="dt-new-run-btn" class="ws-btn ws-btn-secondary" hidden data-i18n="detail.newRun">Configure Another Run</button>
               <button id="dt-reset-btn" class="ws-btn ws-btn-danger" hidden data-i18n="detail.reset">Reset</button>
             </div>
@@ -1690,6 +1720,21 @@
         <button type="button" id="trial-modal-dismiss-btn" class="ws-btn ws-btn-secondary ws-btn-block" data-i18n="trialModal.maybeLater">Maybe Later</button>
       </div>
     </div>
+  </div>
+
+  <!-- FINAL UI REORGANIZATION mission — GLOBAL STICKY STATUS BAR (section
+       6): a compact, read-only footer visible while scrolling, on every
+       tab. UI-only by construction — renderStickyStatus() (popup.js)
+       only ever READS already-existing state (activeLiveSession/
+       currentDeepScrapeRun-equivalent Detail state) the same render
+       functions already populate elsewhere; it owns no timer, no state
+       machine, and mutates nothing. Its one action button
+       (#sticky-status-stop-btn) is wired to the EXACT SAME
+       handleStopAutoPaginate function #durdur-btn already uses — never a
+       second implementation of Stop. -->
+  <div id="sticky-status-bar" class="ws-sticky-status" hidden>
+    <span id="sticky-status-text" class="ws-sticky-status-text"></span>
+    <button type="button" id="sticky-status-stop-btn" class="ws-btn ws-btn-danger ws-sticky-status-stop-btn" hidden data-i18n="liveSession.durdur">DURDUR</button>
   </div>
 
   <script src="../utils/storage.js"></script>
